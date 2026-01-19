@@ -1,0 +1,112 @@
+from __future__ import annotations
+import json
+from functools import cached_property, lru_cache
+from pathlib import Path
+from typing import List
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+settings_config = SettingsConfigDict(
+        env_file=Path(__file__).resolve().parents[2] / ".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra='ignore'
+    )
+
+class Settings(BaseSettings):
+    app_title: str = "Demo"
+    api_v1_prefix: str = "/v1"
+    session_secret_key: str = Field(...)
+    sqlite_db_path: str = "omicron.db"
+
+    model_config = settings_config
+
+
+class GmailAuthSettings(BaseSettings): 
+    client_secrets_file: str = Field(validation_alias='gmail_client_secrets_file')
+    scopes: List[str] = Field(validation_alias='gmail_scopes')
+    redirect_uri: str = Field(validation_alias='gmail_redirect_uri')
+    post_connect_redirect: str = Field(validation_alias='gmail_post_connect_redirect')
+
+    model_config = settings_config
+
+    def _resolve_client_secrets_path(self) -> Path:
+        secrets_path = Path(self.client_secrets_file)
+        if not secrets_path.is_absolute():
+            secrets_path = Path(__file__).resolve().parents[2] / secrets_path
+        return secrets_path
+
+    @cached_property
+    def _client_secrets(self) -> dict[str, str]:
+        secrets_path = self._resolve_client_secrets_path()
+        data = json.loads(secrets_path.read_text(encoding="utf-8"))
+        if "installed" in data:
+            return data["installed"]
+        if "web" in data:
+            return data["web"]
+        raise ValueError("Unsupported client secrets file format")
+
+    @property
+    def client_id(self) -> str:
+        return self._client_secrets["client_id"]
+
+    @property
+    def client_secret(self) -> str:
+        return self._client_secrets["client_secret"]
+
+    @property
+    def auth_uri(self) -> str:
+        return self._client_secrets["auth_uri"]
+
+    @property
+    def token_uri(self) -> str:
+        return self._client_secrets["token_uri"]
+    
+
+
+class OpenAISettings(BaseSettings): 
+    api_key: str = Field(validation_alias='openai_api_key')
+    max_retries: int = 5
+
+    model_config = settings_config
+
+
+class OrchestratorAgentSettings(BaseSettings): 
+    model: str = Field(default='gpt-5.2', validation_alias='orchestrator_agent_model')
+    reasoning_effort: str = Field(default='high', validation_alias='orchestrator_agent_reasoning_effort')
+    reasoning_summary: str = Field(default='detailed', validation_alias='orchestrator_agent_reasoning_summary')
+
+    model_config = settings_config
+
+
+class GmailAgentSettings(BaseSettings): 
+    model: str = Field(default='gpt-5.2', validation_alias='gmail_agent_model')
+    reasoning_effort: str = Field(default='high', validation_alias='gmail_agent_reasoning_effort')
+    reasoning_summary: str = Field(default='detailed', validation_alias='gmail_agent_reasoning_summary')
+
+    model_config = settings_config
+
+
+@lru_cache(1)
+def get_settings() -> Settings:
+    return Settings()
+
+@lru_cache(1)
+def get_gmail_auth_settings() -> GmailAuthSettings:
+    return GmailAuthSettings()
+
+
+def get_openai_settings() -> OpenAISettings:
+    return OpenAISettings()
+
+
+@lru_cache(1)
+def get_orchestrator_agent_settings() -> OrchestratorAgentSettings:
+    return OrchestratorAgentSettings()
+
+@lru_cache(1)
+def get_gmail_agent_settings() -> GmailAgentSettings:
+    return GmailAgentSettings()
+

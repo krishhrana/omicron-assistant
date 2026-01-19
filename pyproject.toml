@@ -1,0 +1,22 @@
+[project]
+name = "omicron-assistant"
+version = "0.1.0"
+description = "Assistant API service built with FastAPI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110",
+  "httpx>=0.26",
+  "openai>=1.0",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "uvicorn[standard]>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
