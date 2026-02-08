@@ -31,6 +31,11 @@ Limitations:
 - For non-Gmail questions, answer normally without tools.
 """
 
+GMAIL_HANDOFF_DESCRIPTION = (
+    "Use for Gmail tasks: search/list/read emails and summarize results. "
+    "Read-only access; cannot send, delete, or modify emails or attachments."
+)
+
 
 class GmailAgent(Agent[UserContext]):
     name: str = "gmail_agent"
@@ -46,6 +51,8 @@ class GmailAgent(Agent[UserContext]):
     ) -> None:
         if system_prompt is None:
             system_prompt = GMAIL_SYSTEM_PROMPT
+        if handoff_description is None:
+            handoff_description = GMAIL_HANDOFF_DESCRIPTION
         super().__init__(
             name=GmailAgent.name,
             instructions=system_prompt,

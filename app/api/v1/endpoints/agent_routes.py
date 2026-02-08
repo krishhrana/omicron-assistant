@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import AsyncIterator, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from agents import (
@@ -15,10 +15,11 @@ from agents.stream_events import StreamEvent
 
 from app.core.enums import SupportedApps
 from app.core.exceptions import AppNotConnectedError
+from app.auth import AuthContext, get_auth_context
 from app.dependencies import get_openai_client
 from app.integrations.gmail.tools import UserContext
 from app.schemas.endpoint_schemas.agent import AgentRunPayload
-from app.utils.agent_utils import init_orchestrator_agent
+from app.agents.workflow import init_orchestrator_agent
 
 
 router = APIRouter()
@@ -54,8 +55,15 @@ def _format_event(event: StreamEvent) -> dict[str, Any] | None:
 
 
 @router.post('/run-agent')
-async def run_agent(payload: AgentRunPayload):
-    user_ctx = UserContext(user_id="dummy_user_id", connected_apps=[SupportedApps.GMAIL])
+async def run_agent(
+    payload: AgentRunPayload,
+    auth_ctx: AuthContext = Depends(get_auth_context),
+):
+    user_ctx = UserContext(
+        user_id=auth_ctx.user_id,
+        user_jwt=auth_ctx.token,
+        connected_apps=[SupportedApps.GMAIL, SupportedApps.GOOGLE_DRIVE],
+    )
     session = OpenAIConversationsSession(
         conversation_id=payload.session_id,
         openai_client=get_openai_client(),
@@ -72,6 +80,7 @@ async def run_agent(payload: AgentRunPayload):
         agent,
         payload.query,
         context=user_ctx,
+        max_turns=50,
         session=session,
         run_config=RunConfig(
             nest_handoff_history=False

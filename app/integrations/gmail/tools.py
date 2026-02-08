@@ -8,20 +8,8 @@ from agents import FunctionTool, RunContextWrapper, function_tool
 from app.integrations.gmail import services as gmail_services
 from app.schemas.integration_schemas.gmail import GmailMessage
 from app.core.enums import SupportedApps
+from app.utils.agent_utils import UserContext, get_user_id, get_user_jwt
 
-
-
-@dataclass
-class UserContext:
-    user_id: str
-    connected_apps: list[SupportedApps] | None = None
-
-
-def _get_user_id(ctx: RunContextWrapper[UserContext]) -> str:
-    user_id = ctx.context.user_id
-    if not user_id:
-        raise RuntimeError("Missing user_id in Gmail tool context")
-    return user_id
 
 
 async def _list_unread_messages_tool(
@@ -44,7 +32,8 @@ async def _list_unread_messages_tool(
         page_token is None when there are no more pages.
     """
     result = await gmail_services.list_unread_messages(
-        user_id=_get_user_id(ctx),
+        user_id=get_user_id(ctx),
+        user_jwt=get_user_jwt(ctx),
         max_results=max_results,
         page_token=page_token,
     )
@@ -73,7 +62,8 @@ async def _search_messages_tool(
         page_token is None when there are no more pages.
     """
     result = await gmail_services.search_messages(
-        user_id=_get_user_id(ctx),
+        user_id=get_user_id(ctx),
+        user_jwt=get_user_jwt(ctx),
         query=query,
         max_results=max_results,
         page_token=page_token,
@@ -101,7 +91,7 @@ async def _read_message_tool(
         msg_body is a snippet for compact, or full message body for full.
     """
     fn = gmail_services.read_message_compact if format == 'compact' else gmail_services.read_message_full
-    result = await fn(_get_user_id(ctx), message_id)
+    result = await fn(get_user_id(ctx), get_user_jwt(ctx), message_id)
     return result.model_dump()
 
 
@@ -124,7 +114,7 @@ async def _batch_read_messages_tool(
         - messages: list of GmailMessage dicts (see read_message).
         - error_messages: list of message IDs that failed to fetch.
     """
-    result = await gmail_services.batch_read_messages(_get_user_id(ctx), messages_ids, format)
+    result = await gmail_services.batch_read_messages(get_user_id(ctx), get_user_jwt(ctx), messages_ids, format)
     return result.model_dump()
 
 

@@ -3,21 +3,21 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
-
 from google_auth_oauthlib.flow import Flow
 
-from app.core.settings import get_gmail_auth_settings
-from app.db.gmail_sql import upsert_gmail_connection, list_gmail_users
 from app.auth import AuthContext, get_auth_context
-
+from app.core.settings import get_google_drive_settings
+from app.db.google_drive_sql import (
+    list_google_drive_users,
+    upsert_google_drive_connection,
+)
 
 
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
-settings = get_gmail_auth_settings()
+settings = get_google_drive_settings()
 
 router = APIRouter()
-    
 
 
 def make_flow(state: Optional[str] = None) -> Flow:
@@ -30,8 +30,8 @@ def make_flow(state: Optional[str] = None) -> Flow:
     return flow
 
 
-@router.get("/oauth/gmail/start")
-def oauth_gmail_start(
+@router.get("/oauth/google-drive/start")
+def oauth_google_drive_start(
     request: Request,
     force_consent: bool = False,
     auth_ctx: AuthContext = Depends(get_auth_context),
@@ -55,35 +55,36 @@ def oauth_gmail_start(
 
     # Save CSRF state + who is connecting (so callback can map it)
     user_id = auth_ctx.user_id
-    request.session["google_oauth_state"] = state
-    request.session["google_oauth_user_id"] = user_id
-    request.session["google_oauth_user_jwt"] = auth_ctx.token
+    request.session["google_drive_oauth_state"] = state
+    request.session["google_drive_oauth_user_id"] = user_id
+    request.session["google_drive_oauth_user_jwt"] = auth_ctx.token
     return {"url": authorization_url}
     # return RedirectResponse(authorization_url)
 
 
-@router.get("/oauth/gmail/callback")
-def oauth_gmail_callback(request: Request):
-    session_state = request.session.get("google_oauth_state")
-    session_user_id = request.session.get("google_oauth_user_id")
-    session_user_jwt = request.session.get("google_oauth_user_jwt")
+@router.get("/oauth/google-drive/callback")
+def oauth_google_drive_callback(request: Request):
+    session_state = request.session.get("google_drive_oauth_state")
+    session_user_id = request.session.get("google_drive_oauth_user_id")
+    session_user_jwt = request.session.get("google_drive_oauth_user_jwt")
 
     state = request.query_params.get("state")
-    if not state or not session_state or state != session_state: 
+    if not state or not session_state or state != session_state:
         raise HTTPException(status_code=400, detail="Invalid OAuth State")
-    
+
     if not session_user_id:
         raise HTTPException(status_code=400, detail="Missing User ID")
     if not session_user_jwt:
         raise HTTPException(status_code=400, detail="Missing User JWT")
-    
+
     flow = make_flow(state=state)
     flow.fetch_token(authorization_response=str(request.url))
 
     creds = flow.credentials
+    print(creds)
     expires_at = creds.expiry.isoformat() if creds.expiry else None
     scopes = list(creds.scopes) if creds.scopes else None
-    upsert_gmail_connection(
+    upsert_google_drive_connection(
         user_id=session_user_id,
         user_jwt=session_user_jwt,
         google_email=None,

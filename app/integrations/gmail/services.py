@@ -10,20 +10,28 @@ from html import escape as html_escape
 
 async def list_unread_messages(
     user_id: str,
+    user_jwt: str,
     max_results: int = 10,
     page_token: str | None = None,
 ) -> GmailSearchMessagesResponse:
-    return await search_messages(user_id=user_id, query="is:unread", max_results=max_results, page_token=page_token)
+    return await search_messages(
+        user_id=user_id,
+        user_jwt=user_jwt,
+        query="is:unread",
+        max_results=max_results,
+        page_token=page_token,
+    )
 
 
 @gmail_api
 def search_messages(
     user_id: str,
+    user_jwt: str,
     query: str,
     max_results: int = 10,
     page_token: str | None = None,
 ) -> GmailSearchMessagesResponse:
-    service = get_gmail_client_for_user(user_id=user_id)
+    service = get_gmail_client_for_user(user_id=user_id, user_jwt=user_jwt)
     resp = (
         service.users()
         .messages()
@@ -39,8 +47,8 @@ def search_messages(
 
 
 @gmail_api
-def read_message_compact(user_id: str, message_id: str) -> GmailMessage: 
-    service = get_gmail_client_for_user(user_id)
+def read_message_compact(user_id: str, user_jwt: str, message_id: str) -> GmailMessage: 
+    service = get_gmail_client_for_user(user_id, user_jwt)
     message: dict = (
         service.users()
         .messages()
@@ -70,9 +78,10 @@ def read_message_compact(user_id: str, message_id: str) -> GmailMessage:
 @gmail_api
 def read_message_full(
     user_id: str,
+    user_jwt: str,
     message_id: str,
 ) -> GmailMessage:
-    service = get_gmail_client_for_user(user_id)
+    service = get_gmail_client_for_user(user_id, user_jwt)
     message = (
         service.users()
         .messages()
@@ -123,9 +132,14 @@ def read_message_full(
     )
 
 
-async def batch_read_messages(user_id: str, messages_ids: List[str], format: Literal['compact', 'full'] = 'compact') -> BatchedGmailMessages: 
+async def batch_read_messages(
+    user_id: str,
+    user_jwt: str,
+    messages_ids: List[str],
+    format: Literal['compact', 'full'] = 'compact',
+) -> BatchedGmailMessages: 
     fn = read_message_compact if format == 'compact' else read_message_full
-    tasks = [fn(user_id, message_id) for message_id in messages_ids]
+    tasks = [fn(user_id, user_jwt, message_id) for message_id in messages_ids]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     error_msg_ids = []
     clean_results = []  
