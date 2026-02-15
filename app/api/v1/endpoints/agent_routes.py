@@ -14,7 +14,6 @@ from agents import (
 )
 from agents.stream_events import StreamEvent
 
-from app.core.exceptions import AppNotConnectedError
 from app.auth import AuthContext, get_auth_context
 from app.browser_sessions.controller_client import get_controller_client
 from app.browser_sessions.lazy_mcp_server import LazyBrowserSessionMCPServer
@@ -118,13 +117,7 @@ async def run_agent(
         conversation_id=conversation_id,
         openai_client=get_openai_client(),
     )
-    try:
-        agent = init_orchestrator_agent(
-            connected_apps=user_ctx.connected_apps,
-            app_choice=payload.app,
-        )
-    except AppNotConnectedError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    agent = init_orchestrator_agent(connected_apps=user_ctx.connected_apps)
 
     result = Runner.run_streamed(
         agent,

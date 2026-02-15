@@ -220,7 +220,7 @@ Lifecycle:
 2. **Replace global `PLAYWRIGHT_MCP_URL` usage**
    - Keep `PLAYWRIGHT_MCP_URL` only for local dev fallback.
    - In prod:
-     - When `app=browser` (or orchestrator routes to browser), call controller `get-or-create` with `user_id + conversation_id`.
+     - When orchestrator routes to browser, call controller `get-or-create` with `user_id + conversation_id`.
      - Create `MCPServerStreamableHttp` per request using returned `mcp_url`.
      - Connect it, pass into a per-request `BrowserAgent`, then cleanup after run.
 

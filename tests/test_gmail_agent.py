@@ -13,7 +13,6 @@ startup()
 
 agent = init_orchestrator_agent(
             connected_apps=[SupportedApps.GMAIL],
-            app_choice=SupportedApps.GMAIL,
         )
 
 gmail_agent = GmailAgent(

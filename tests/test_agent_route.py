@@ -10,7 +10,7 @@ def main() -> None:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     while True: 
         query = input("Query: ")
-        payload = {"query": query, "app": "gmail", "session_id": session_id}
+        payload = {"query": query, "session_id": session_id}
         resp = requests.post(url, json=payload, stream=True, headers=headers)
         print("status:", resp.status_code)
         for line in resp.iter_lines(decode_unicode=True):

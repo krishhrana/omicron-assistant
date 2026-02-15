@@ -79,7 +79,6 @@ Note: OAuth state/user are stored in the session cookie; keep the same browser s
 `POST /v1/run-agent` accepts:
 
 - `query` (string, required)
-- `app` (string enum, optional; `gmail`, `drive`, or `browser` when Playwright MCP is connected)
 - `session_id` (string, optional)
 
 Response is `text/event-stream` with events like: `delta`, `message`, `tool_called`,
@@ -90,7 +89,7 @@ Example:
 ```bash
 curl -N -X POST http://localhost:8000/v1/run-agent \
   -H "Content-Type: application/json" \
-  -d '{"query":"Find unread emails from last week","app":"gmail"}'
+  -d '{"query":"Find unread emails from last week"}'
 ```
 
 For manual streaming tests, see `tests/test_agent_route.py` and `tests/test_gmail_agent.py`.
@@ -99,7 +98,7 @@ For manual streaming tests, see `tests/test_agent_route.py` and `tests/test_gmai
 
 - `app/agents/` orchestrator + Gmail/Google Drive/Browser agent definitions
 - `app/api/v1/endpoints/` HTTP routes
-- `app/core/` settings, enums, exceptions
+- `app/core/` settings, enums
 - `app/db/` database helpers and schema
 - `app/integrations/gmail/` Gmail tools and services
 - `app/integrations/google_drive/` Google Drive tools and services
