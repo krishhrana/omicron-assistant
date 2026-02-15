@@ -1,12 +1,13 @@
 # Omicron Assistant API
 
 FastAPI service for a multi-agent assistant. The orchestrator routes user requests to
-specialist agents; current focus is read-only Gmail and Google Drive agents.
+specialist agents; current focus is read-only Gmail, Google Drive, and browser automation agents.
 
 ## Current scope
 
 - Orchestrator agent with handoff to Gmail and Google Drive agents (OpenAI Agents SDK, `agents`).
 - Gmail + Google Drive OAuth connect flows with token storage in Supabase.
+- Optional Playwright MCP browser agent for web navigation and guided web tasks.
 - Gmail tools: list unread, search, read, and batch read (compact/full).
 - Google Drive tools: search/list files with metadata + webViewLink (read-only).
 - Streaming agent output via SSE (`/v1/run-agent`).
@@ -38,7 +39,11 @@ specialist agents; current focus is read-only Gmail and Google Drive agents.
 - `GOOGLE_DRIVE_SCOPES`: list of Google Drive OAuth scopes.
 - `GOOGLE_DRIVE_REDIRECT_URI`: callback URL (must match Google OAuth settings).
 - `GOOGLE_DRIVE_POST_CONNECT_REDIRECT`: browser redirect after successful OAuth.
-- `ORCHESTRATOR_AGENT_*`, `GMAIL_AGENT_*`, `GOOGLE_DRIVE_AGENT_*`: model + reasoning settings.
+- `ORCHESTRATOR_AGENT_*`, `GMAIL_AGENT_*`, `GOOGLE_DRIVE_AGENT_*`, `BROWSER_AGENT_*`: model + reasoning settings.
+- `PLAYWRIGHT_MCP_URL`: Streamable HTTP MCP endpoint (example: `http://localhost:8080/mcp`).
+- `PLAYWRIGHT_MCP_TIMEOUT`, `PLAYWRIGHT_MCP_SSE_READ_TIMEOUT`, `PLAYWRIGHT_MCP_CLIENT_SESSION_TIMEOUT_SECONDS`, `PLAYWRIGHT_MCP_MAX_RETRY_ATTEMPTS`: browser MCP connection tuning.
+- `PLAYWRIGHT_MCP_CONNECT_ON_STARTUP`: local-dev only; when `true`, connect a global Playwright MCP server on API startup.
+- `BROWSER_SESSION_CONTROLLER_URL`, `BROWSER_SESSION_CONTROLLER_JWT_SECRET`, `BROWSER_SESSION_CONTROLLER_JWT_AUDIENCE`, `BROWSER_SESSION_CONTROLLER_TIMEOUT_SECONDS`: production path for lazy per-session Playwright MCP runners (controller provisions runner Pods keyed by Supabase `chat_sessions.id`).
 
 Note: scope lists must be valid JSON arrays, e.g.
 `GMAIL_SCOPES=["https://www.googleapis.com/auth/gmail.readonly"]`.
@@ -74,7 +79,7 @@ Note: OAuth state/user are stored in the session cookie; keep the same browser s
 `POST /v1/run-agent` accepts:
 
 - `query` (string, required)
-- `app` (string enum, optional; `gmail` or `drive`)
+- `app` (string enum, optional; `gmail`, `drive`, or `browser` when Playwright MCP is connected)
 - `session_id` (string, optional)
 
 Response is `text/event-stream` with events like: `delta`, `message`, `tool_called`,
@@ -92,7 +97,7 @@ For manual streaming tests, see `tests/test_agent_route.py` and `tests/test_gmai
 
 ## Project layout
 
-- `app/agents/` orchestrator + Gmail/Google Drive agent definitions
+- `app/agents/` orchestrator + Gmail/Google Drive/Browser agent definitions
 - `app/api/v1/endpoints/` HTTP routes
 - `app/core/` settings, enums, exceptions
 - `app/db/` database helpers and schema

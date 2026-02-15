@@ -4,6 +4,7 @@ __pycache__/
 *.pyd
 *.egg-info/
 .env
+.playwright_secrets
 .venv/
 .vscode/
 .idea/
@@ -11,3 +12,4 @@ __pycache__/
 .DS_Store
 *.db
 .creds/
+tests/

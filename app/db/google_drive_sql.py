@@ -12,7 +12,7 @@ class GoogleDriveCreds:
     status: str | None
 
 
-def upsert_google_drive_connection(
+async def upsert_google_drive_connection(
     *,
     user_id: str,
     user_jwt: str,
@@ -27,9 +27,9 @@ def upsert_google_drive_connection(
     scopes_json = json.dumps(scopes) if scopes is not None else None
     encrypted_refresh = encrypt_token(refresh_token_encrypted, service="google_drive")
     encrypted_access = encrypt_token(access_token, service="google_drive")
-    client = create_supabase_user_client(user_jwt)
+    client = await create_supabase_user_client(user_jwt)
     try:
-        existing_resp = (
+        existing_resp = await (
             client.table("google_drive_connections")
             .select(
                 "google_email, refresh_token_encrypted, access_token, access_token_expires_at, scopes"
@@ -66,15 +66,15 @@ def upsert_google_drive_connection(
             "revoked_at": revoked_at,
             "status": status,
         }
-        client.table("google_drive_connections").upsert(payload, on_conflict="user_id").execute()
+        await client.table("google_drive_connections").upsert(payload, on_conflict="user_id").execute()
     finally:
-        client.postgrest.aclose()
+        await client.postgrest.aclose()
 
 
-def get_google_drive_creds(user_id: str, user_jwt: str) -> GoogleDriveCreds | None:
-    client = create_supabase_user_client(user_jwt)
+async def get_google_drive_creds(user_id: str, user_jwt: str) -> GoogleDriveCreds | None:
+    client = await create_supabase_user_client(user_jwt)
     try:
-        response = (
+        response = await (
             client.table("google_drive_connections")
             .select("access_token, refresh_token_encrypted, status")
             .eq("user_id", user_id)
@@ -91,15 +91,14 @@ def get_google_drive_creds(user_id: str, user_jwt: str) -> GoogleDriveCreds | No
             status=data.get("status"),
         )
     finally:
-        client.postgrest.aclose()
+        await client.postgrest.aclose()
 
 
-def list_google_drive_users(user_jwt: str, limit: int = 100):
-    client = create_supabase_user_client(user_jwt)
+async def list_google_drive_users(user_jwt: str, limit: int = 100):
+    client = await create_supabase_user_client(user_jwt)
     try:
-        response = client.table("google_drive_connections").select("*").limit(limit).execute()
+        response = await client.table("google_drive_connections").select("*").limit(limit).execute()
         return response.data if response else []
     finally:
-        client.postgrest.aclose()
-
+        await client.postgrest.aclose()
 

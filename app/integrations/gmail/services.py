@@ -1,5 +1,7 @@
 from typing import List, Literal
 
+from fastapi.concurrency import run_in_threadpool
+
 from app.utils.gmail_utils import gmail_api, get_gmail_client_for_user
 from app.schemas.integration_schemas.gmail import GmailMessage, GmailSearchMessagesResponse, BatchedGmailMessages
 
@@ -24,16 +26,16 @@ async def list_unread_messages(
 
 
 @gmail_api
-def search_messages(
+async def search_messages(
     user_id: str,
     user_jwt: str,
     query: str,
     max_results: int = 10,
     page_token: str | None = None,
 ) -> GmailSearchMessagesResponse:
-    service = get_gmail_client_for_user(user_id=user_id, user_jwt=user_jwt)
-    resp = (
-        service.users()
+    service = await get_gmail_client_for_user(user_id=user_id, user_jwt=user_jwt)
+    resp = await run_in_threadpool(
+        lambda: service.users()
         .messages()
         .list(
             userId="me",
@@ -47,10 +49,10 @@ def search_messages(
 
 
 @gmail_api
-def read_message_compact(user_id: str, user_jwt: str, message_id: str) -> GmailMessage: 
-    service = get_gmail_client_for_user(user_id, user_jwt)
-    message: dict = (
-        service.users()
+async def read_message_compact(user_id: str, user_jwt: str, message_id: str) -> GmailMessage: 
+    service = await get_gmail_client_for_user(user_id, user_jwt)
+    message: dict = await run_in_threadpool(
+        lambda: service.users()
         .messages()
         .get(
             userId="me", 
@@ -76,14 +78,14 @@ def read_message_compact(user_id: str, user_jwt: str, message_id: str) -> GmailM
 
 
 @gmail_api
-def read_message_full(
+async def read_message_full(
     user_id: str,
     user_jwt: str,
     message_id: str,
 ) -> GmailMessage:
-    service = get_gmail_client_for_user(user_id, user_jwt)
-    message = (
-        service.users()
+    service = await get_gmail_client_for_user(user_id, user_jwt)
+    message = await run_in_threadpool(
+        lambda: service.users()
         .messages()
         .get(
             userId="me", 

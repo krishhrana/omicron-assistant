@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
+from fastapi.concurrency import run_in_threadpool
 from google_auth_oauthlib.flow import Flow
 
 from app.auth import AuthContext, get_auth_context
@@ -20,7 +21,7 @@ settings = get_google_drive_settings()
 router = APIRouter()
 
 
-def make_flow(state: Optional[str] = None) -> Flow:
+def _build_flow(state: Optional[str] = None) -> Flow:
     flow = Flow.from_client_secrets_file(
         settings.client_secrets_file,
         scopes=settings.scopes,
@@ -30,8 +31,12 @@ def make_flow(state: Optional[str] = None) -> Flow:
     return flow
 
 
+async def make_flow(state: Optional[str] = None) -> Flow:
+    return await run_in_threadpool(_build_flow, state)
+
+
 @router.get("/oauth/google-drive/start")
-def oauth_google_drive_start(
+async def oauth_google_drive_start(
     request: Request,
     force_consent: bool = False,
     auth_ctx: AuthContext = Depends(get_auth_context),
@@ -42,7 +47,7 @@ def oauth_google_drive_start(
     force_consent=true is useful ONLY when you need to guarantee a refresh token
     (e.g., you lost it and must re-consent).
     """
-    flow = make_flow()
+    flow = await make_flow()
 
     auth_kwargs = dict(
         access_type="offline",            # critical: enables refresh token
@@ -51,7 +56,7 @@ def oauth_google_drive_start(
     if force_consent:
         auth_kwargs["prompt"] = "consent"
 
-    authorization_url, state = flow.authorization_url(**auth_kwargs)
+    authorization_url, state = await run_in_threadpool(flow.authorization_url, **auth_kwargs)
 
     # Save CSRF state + who is connecting (so callback can map it)
     user_id = auth_ctx.user_id
@@ -63,7 +68,7 @@ def oauth_google_drive_start(
 
 
 @router.get("/oauth/google-drive/callback")
-def oauth_google_drive_callback(request: Request):
+async def oauth_google_drive_callback(request: Request):
     session_state = request.session.get("google_drive_oauth_state")
     session_user_id = request.session.get("google_drive_oauth_user_id")
     session_user_jwt = request.session.get("google_drive_oauth_user_jwt")
@@ -77,14 +82,13 @@ def oauth_google_drive_callback(request: Request):
     if not session_user_jwt:
         raise HTTPException(status_code=400, detail="Missing User JWT")
 
-    flow = make_flow(state=state)
-    flow.fetch_token(authorization_response=str(request.url))
+    flow = await make_flow(state=state)
+    await run_in_threadpool(flow.fetch_token, authorization_response=str(request.url))
 
     creds = flow.credentials
-    print(creds)
     expires_at = creds.expiry.isoformat() if creds.expiry else None
     scopes = list(creds.scopes) if creds.scopes else None
-    upsert_google_drive_connection(
+    await upsert_google_drive_connection(
         user_id=session_user_id,
         user_jwt=session_user_jwt,
         google_email=None,

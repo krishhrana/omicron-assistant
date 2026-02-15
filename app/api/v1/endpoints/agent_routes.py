@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime, timezone
 from typing import AsyncIterator, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,16 +14,31 @@ from agents import (
 )
 from agents.stream_events import StreamEvent
 
-from app.core.enums import SupportedApps
 from app.core.exceptions import AppNotConnectedError
 from app.auth import AuthContext, get_auth_context
+from app.browser_sessions.controller_client import get_controller_client
+from app.browser_sessions.lazy_mcp_server import LazyBrowserSessionMCPServer
 from app.dependencies import get_openai_client
-from app.integrations.gmail.tools import UserContext
+from app.utils.agent_utils import UserContext
+from app.db.chat_sessions_sql import (
+    create_chat_session_stub,
+    get_chat_session,
+    get_chat_session_by_conversation_id,
+    upsert_chat_session,
+    update_chat_session_by_id,
+)
 from app.schemas.endpoint_schemas.agent import AgentRunPayload
 from app.agents.workflow import init_orchestrator_agent
+from app.agents.registry import get_connected_apps
 
 
 router = APIRouter()
+
+_SSE_HEADERS = {
+    # Prevent intermediary/proxy buffering for SSE where supported.
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+}
 
 
 def _extract_tool_name(raw_item: Any) -> str | None:
@@ -59,13 +75,47 @@ async def run_agent(
     payload: AgentRunPayload,
     auth_ctx: AuthContext = Depends(get_auth_context),
 ):
+    connected_apps = get_connected_apps()
+    controller_client = get_controller_client()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Canonical session key for the product is Supabase chat_sessions.id (UUID).
+    effective_session_id: str | None = None
+    conversation_id: str | None = None
+    should_set_title = False
+
+    # Get or Create Session ID in Supabase
+    if payload.session_id:
+        effective_session_id = payload.session_id
+        session_row = await get_chat_session(
+            user_id=auth_ctx.user_id,
+            user_jwt=auth_ctx.token,
+            session_id=effective_session_id,
+        )
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+        conversation_id = session_row.get("conversation_id")
+    else:
+        effective_session_id = await create_chat_session_stub(
+            user_id=auth_ctx.user_id,
+            user_jwt=auth_ctx.token,
+            title=payload.query,
+            last_message_at=now_iso,
+        )
+        should_set_title = True
+
+    if not effective_session_id:
+        raise HTTPException(status_code=500, detail="Failed to resolve session_id")
+
     user_ctx = UserContext(
         user_id=auth_ctx.user_id,
         user_jwt=auth_ctx.token,
-        connected_apps=[SupportedApps.GMAIL, SupportedApps.GOOGLE_DRIVE],
+        session_id=effective_session_id,
+        connected_apps=connected_apps,
     )
+
     session = OpenAIConversationsSession(
-        conversation_id=payload.session_id,
+        conversation_id=conversation_id,
         openai_client=get_openai_client(),
     )
     try:
@@ -80,7 +130,7 @@ async def run_agent(
         agent,
         payload.query,
         context=user_ctx,
-        max_turns=50,
+        max_turns=100,
         session=session,
         run_config=RunConfig(
             nest_handoff_history=False
@@ -88,8 +138,47 @@ async def run_agent(
     )
 
     async def event_stream() -> AsyncIterator[str]:
+        # Some proxies buffer small chunks; a comment preamble helps force an early flush.
+        yield ":" + (" " * 2048) + "\n\n"
+
+        # Emit Supabase chat_sessions.id early so the frontend can persist it immediately.
+        yield f"data: {json.dumps({'type': 'session_id', 'session_id': effective_session_id})}\n\n"
+
+        heartbeat_stop = asyncio.Event()
+        heartbeat_task: asyncio.Task | None = None
+
+        async def heartbeat_loop() -> None:
+            assert controller_client is not None
+            while not heartbeat_stop.is_set():
+                try:
+                    await controller_client.heartbeat(session_id=effective_session_id)
+                except Exception as exc:
+                    print(f"browser session heartbeat failed: {exc}")
+                try:
+                    await asyncio.wait_for(heartbeat_stop.wait(), timeout=30)
+                except asyncio.TimeoutError:
+                    continue
+
         try:
             async for event in result.stream_events():
+                if (
+                    controller_client is not None
+                    and heartbeat_task is None
+                    and (
+                        (
+                            event.type == "agent_updated_stream_event"
+                            and getattr(getattr(event, "new_agent", None), "name", None) == "browser_agent"
+                        )
+                        or (
+                            event.type == "run_item_stream_event"
+                            and event.name == "handoff_occured"
+                            and getattr(getattr(getattr(event, "item", None), "target_agent", None), "name", None)
+                            == "browser_agent"
+                        )
+                    )
+                ):
+                    heartbeat_task = asyncio.create_task(heartbeat_loop())
+
                 payload_data = _format_event(event)
                 if payload_data is None:
                     continue
@@ -97,7 +186,46 @@ async def run_agent(
                 print(data)
                 yield f"data: {data}\n\n"
         except asyncio.CancelledError:
+            heartbeat_stop.set()
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
             return
-        yield json.dumps({"type": "session_id", "session_id": await session._get_session_id() if session else ''}) + '\n\n'
+        
+        finally:
+            heartbeat_stop.set()
+            if heartbeat_task is not None:
+                if not heartbeat_task.done():
+                    heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
+                    print(f"browser session heartbeat task failed: {exc}")
+        openai_conversation_id = await session._get_session_id() if session else ""
+        if openai_conversation_id:
+            try:
+                await update_chat_session_by_id(
+                    session_id=effective_session_id,
+                    user_id=auth_ctx.user_id,
+                    user_jwt=auth_ctx.token,
+                    conversation_id=openai_conversation_id,
+                    title=payload.query if should_set_title else None,
+                    last_message_at=datetime.now(timezone.utc).isoformat(),
+                )
+            except Exception as exc:
+                print(f"Failed to update chat session: {exc}")
+
+        # Best-effort: clean up per-run MCP client sessions (do not touch global dev MCP server).
+        try:
+            for sub_agent in getattr(agent, "handoffs", []) or []:
+                for server in getattr(sub_agent, "mcp_servers", []) or []:
+                    if isinstance(server, LazyBrowserSessionMCPServer):
+                        await server.cleanup()
+        except Exception as exc:
+            print(f"browser MCP cleanup failed: {exc}")
+
+        # Backwards-compatible: also emit session_id at the end.
+        yield f"data: {json.dumps({'type': 'session_id', 'session_id': effective_session_id})}\n\n"
         yield "data: [DONE]\n\n"
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=_SSE_HEADERS)

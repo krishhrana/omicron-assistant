@@ -11,8 +11,8 @@ def google_drive_api(fn=None):
     return decorator(fn)
 
 
-def get_google_drive_client_for_user(user_id: str, user_jwt: str): 
-    return get_google_client_for_user(
+async def get_google_drive_client_for_user(user_id: str, user_jwt: str): 
+    return await get_google_client_for_user(
         user_id=user_id, 
         user_jwt=user_jwt, 
         token_loader=get_google_drive_creds, 

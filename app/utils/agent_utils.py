@@ -8,6 +8,8 @@ from app.core.enums import SupportedApps
 class UserContext:
     user_id: str
     user_jwt: str | None = None
+    # Supabase chat_sessions.id. Canonical identifier for multi-user session state (e.g., browser runners).
+    session_id: str | None = None
     connected_apps: list[SupportedApps] | None = None
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 from functools import wraps
-from typing import Callable, Protocol
+from typing import Awaitable, Callable, Protocol
 
 from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -51,29 +51,31 @@ def google_api(service_label: str):
     return decorator
 
 
-def get_google_client_for_user(
+async def get_google_client_for_user(
     *,
     user_id: str,
     user_jwt: str,
-    token_loader: Callable[[str, str], GoogleCreds | None],
+    token_loader: Callable[[str, str], Awaitable[GoogleCreds | None]],
     settings: GoogleAuthSettings,
     api_service: str,
     api_version: str,
     service_label: str | None = None,
 ):
-    user_tokens = token_loader(user_id, user_jwt)
+    user_tokens = await token_loader(user_id, user_jwt)
     if not user_tokens:
         label = service_label or api_service
         raise HTTPException(status_code=401, detail=f"{label} credentials not found")
-    creds = Credentials(
-        token=user_tokens.access_token,
-        refresh_token=user_tokens.refresh_token,
-        token_uri=settings.token_uri,
-        client_id=settings.client_id,
-        client_secret=settings.client_secret,
-        scopes=settings.scopes,
-    )
-    if not creds.valid:
-        creds.refresh(Request())
+    def _build_client():
+        creds = Credentials(
+            token=user_tokens.access_token,
+            refresh_token=user_tokens.refresh_token,
+            token_uri=settings.token_uri,
+            client_id=settings.client_id,
+            client_secret=settings.client_secret,
+            scopes=settings.scopes,
+        )
+        if not creds.valid:
+            creds.refresh(Request())
+        return build(api_service, api_version, credentials=creds)
 
-    return build(api_service, api_version, credentials=creds)
+    return await run_in_threadpool(_build_client)

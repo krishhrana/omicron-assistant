@@ -41,4 +41,5 @@ def get_sub_agents(connected_apps: list[SupportedApps], app_choice: SupportedApp
     if app_choice:
         return [registered_agents[app_choice.value]()]
 
+    print(connected_apps)
     return [registered_agents[app.value]() for app in connected_apps]

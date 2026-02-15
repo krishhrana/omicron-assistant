@@ -107,13 +107,56 @@ class GmailAgentSettings(BaseSettings):
 
 
 class GoogleDriveAgentSettings(BaseSettings): 
-    model: str = Field(default='gpt-5.2', validation_alias='google_drive_agent_model')
+    model: str = Field(default='gpt-5-mini', validation_alias='google_drive_agent_model')
     reasoning_effort: str = Field(default='high', validation_alias='google_drive_reasoning_effort')
     reasoning_summary: str = Field(default='detailed', validation_alias='google_drive_reasoning_summary')
 
     model_config = settings_config
 
 
+class BrowserAgentSettings(BaseSettings):
+    model: str = Field(default='gpt-5.2', validation_alias='browser_agent_model')
+    reasoning_effort: str = Field(default='medium', validation_alias='browser_agent_reasoning_effort')
+    reasoning_summary: str = Field(default='detailed', validation_alias='browser_agent_reasoning_summary')
+    playwright_mcp_url: str | None = Field(default=None, validation_alias='playwright_mcp_url')
+    playwright_mcp_timeout: int = Field(default=120, validation_alias='playwright_mcp_timeout')
+    playwright_mcp_sse_read_timeout: int = Field(
+        default=600,
+        validation_alias='playwright_mcp_sse_read_timeout',
+    )
+    playwright_mcp_client_session_timeout_seconds: int = Field(
+        default=120,
+        validation_alias='playwright_mcp_client_session_timeout_seconds',
+    )
+    playwright_mcp_max_retry_attempts: int = Field(
+        default=2,
+        validation_alias='playwright_mcp_max_retry_attempts',
+    )
+    playwright_mcp_connect_on_startup: bool = Field(
+        default=False,
+        validation_alias="playwright_mcp_connect_on_startup",
+    )
+
+    model_config = settings_config
+
+
+class BrowserSessionControllerSettings(BaseSettings):
+    # Internal controller that provisions per-session Playwright MCP runners.
+    url: str | None = Field(default=None, validation_alias="browser_session_controller_url")
+    jwt_secret: str | None = Field(
+        default=None,
+        validation_alias="browser_session_controller_jwt_secret",
+    )
+    jwt_audience: str = Field(
+        default="browser-session-controller",
+        validation_alias="browser_session_controller_jwt_audience",
+    )
+    timeout_seconds: float = Field(
+        default=10.0,
+        validation_alias="browser_session_controller_timeout_seconds",
+    )
+
+    model_config = settings_config
 
 
 @lru_cache(1)
@@ -146,3 +189,11 @@ def get_gmail_agent_settings() -> GmailAgentSettings:
 def get_google_drive_agent_settings() -> GoogleDriveAgentSettings:
     return GoogleDriveAgentSettings()
 
+
+@lru_cache(1)
+def get_browser_agent_settings() -> BrowserAgentSettings:
+    return BrowserAgentSettings()
+
+@lru_cache(1)
+def get_browser_session_controller_settings() -> BrowserSessionControllerSettings:
+    return BrowserSessionControllerSettings()

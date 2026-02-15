@@ -11,7 +11,7 @@ from app.dependencies import shutdown, startup
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    startup()
+    await startup()
     try:
         yield
     finally:
@@ -25,7 +25,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
         allow_credentials=True,
         expose_headers=["Location"],

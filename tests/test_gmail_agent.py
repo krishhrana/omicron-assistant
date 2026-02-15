@@ -2,10 +2,11 @@ from app.agents import GmailAgent
 from app.core.enums import SupportedApps
 from app.integrations.gmail.tools import GMAIL_TOOLS, UserContext
 from app.dependencies import startup
-from app.utils.agent_utils import init_orchestrator_agent
+from app.agents.workflow import init_orchestrator_agent
 
 from agents import RunConfig, Runner, ItemHelpers, ModelSettings
 import asyncio
+import os
 
 
 startup()
@@ -29,7 +30,10 @@ gmail_agent = GmailAgent(
 )
 
 async def run_agent(): 
-    ctx = UserContext(user_id="dummy_user_id")
+    ctx = UserContext(
+        user_id=os.getenv("SUPABASE_USER_ID", "dummy_user_id"),
+        user_jwt=os.getenv("SUPABASE_USER_JWT"),
+    )
     while True: 
         query = input("Query: ")
         result = Runner.run_streamed(

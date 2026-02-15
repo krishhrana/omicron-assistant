@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pw-runner
+  namespace: omicron-browser
+  # Optional (recommended): IRSA role ARN allowing S3 uploads for videos.
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::<account-id>:role/<role-name>
+
