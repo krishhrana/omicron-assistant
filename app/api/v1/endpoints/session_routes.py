@@ -135,7 +135,6 @@ async def get_session_history(
     raw_count = 0
     last_item_id = None
     async for item in paginator:
-        print(item)
         raw_count += 1
         last_item_id = getattr(item, "id", None)
         normalized = _normalize_conversation_item(item)

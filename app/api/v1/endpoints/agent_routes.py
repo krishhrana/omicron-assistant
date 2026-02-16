@@ -1,18 +1,22 @@
 import asyncio
 import json
 from datetime import datetime, timezone
+import traceback
 from typing import AsyncIterator, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from agents import (
+    AgentToolStreamEvent,
     OpenAIConversationsSession,
     Runner,
     ItemHelpers,
     RunConfig,
 )
 from agents.stream_events import StreamEvent
+
+from openai.types.responses import ResponseReasoningSummaryTextDeltaEvent, ResponseReasoningSummaryTextDoneEvent
 
 from app.auth import AuthContext, get_auth_context
 from app.browser_sessions.controller_client import get_controller_client
@@ -27,8 +31,10 @@ from app.db.chat_sessions_sql import (
     update_chat_session_by_id,
 )
 from app.schemas.endpoint_schemas.agent import AgentRunPayload
-from app.agents.workflow import init_orchestrator_agent
+from app.agents.workflow import create_agent_workflow
 from app.agents.registry import get_connected_apps
+from app.utils.runtime_utils import heartbeat_loop, should_init_browser_heartbeat, cleanup_heartbeat_task
+
 
 
 router = APIRouter()
@@ -39,6 +45,8 @@ _SSE_HEADERS = {
     "X-Accel-Buffering": "no",
 }
 
+_STREAM_END_SENTINEL = 'STREAM_END'
+
 
 def _extract_tool_name(raw_item: Any) -> str | None:
     if isinstance(raw_item, dict):
@@ -48,9 +56,15 @@ def _extract_tool_name(raw_item: Any) -> str | None:
 
 def _format_event(event: StreamEvent) -> dict[str, Any] | None:
     if event.type == "raw_response_event":
+        print(type(event.data))
         event_type = getattr(event.data, "type", None)
         if event_type == "response.output_text.delta":
             return {"type": "delta", "text": event.data.delta}
+        if isinstance(event.data, ResponseReasoningSummaryTextDeltaEvent):
+            print("In Reasoning Delta")
+            return {"type": "reasoning_delta", "text": event.data.delta}
+        if isinstance(event.data, ResponseReasoningSummaryTextDoneEvent): 
+            return {"type": "reasoning_done"}
         return None
     if event.type == "agent_updated_stream_event":
         return {"type": "agent_updated", "agent": event.new_agent.name}
@@ -77,6 +91,7 @@ async def run_agent(
     connected_apps = get_connected_apps()
     controller_client = get_controller_client()
     now_iso = datetime.now(timezone.utc).isoformat()
+    event_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     # Canonical session key for the product is Supabase chat_sessions.id (UUID).
     effective_session_id: str | None = None
@@ -117,7 +132,25 @@ async def run_agent(
         conversation_id=conversation_id,
         openai_client=get_openai_client(),
     )
-    agent = init_orchestrator_agent(connected_apps=user_ctx.connected_apps)
+
+    async def sub_agent_stream(event: AgentToolStreamEvent) -> None:
+        payload_data = _format_event(event["event"])
+        if payload_data is not None:
+            payload_data["scope"] = "tool"
+            payload_data["agent"] = event["agent"].name
+            data = json.dumps(payload_data, default=str)
+            await event_queue.put(f"data: {data}\n\n")
+
+    agent = create_agent_workflow(
+        connected_apps=user_ctx.connected_apps, 
+        tool_on_stream=sub_agent_stream, 
+        session=session
+    )
+
+    # agent = init_orchestrator_agent(
+    #     connected_apps=user_ctx.connected_apps,
+    #     tool_on_stream=sub_agent_stream,
+    # )
 
     result = Runner.run_streamed(
         agent,
@@ -137,77 +170,61 @@ async def run_agent(
         # Emit Supabase chat_sessions.id early so the frontend can persist it immediately.
         yield f"data: {json.dumps({'type': 'session_id', 'session_id': effective_session_id})}\n\n"
 
-        heartbeat_stop = asyncio.Event()
-        heartbeat_task: asyncio.Task | None = None
 
-        async def heartbeat_loop() -> None:
-            assert controller_client is not None
-            while not heartbeat_stop.is_set():
-                try:
-                    await controller_client.heartbeat(session_id=effective_session_id)
-                except Exception as exc:
-                    print(f"browser session heartbeat failed: {exc}")
-                try:
-                    await asyncio.wait_for(heartbeat_stop.wait(), timeout=30)
-                except asyncio.TimeoutError:
-                    continue
-
-        try:
-            async for event in result.stream_events():
-                if (
-                    controller_client is not None
-                    and heartbeat_task is None
-                    and (
-                        (
-                            event.type == "agent_updated_stream_event"
-                            and getattr(getattr(event, "new_agent", None), "name", None) == "browser_agent"
-                        )
-                        or (
-                            event.type == "run_item_stream_event"
-                            and event.name == "handoff_occured"
-                            and getattr(getattr(getattr(event, "item", None), "target_agent", None), "name", None)
-                            == "browser_agent"
-                        )
-                    )
-                ):
-                    heartbeat_task = asyncio.create_task(heartbeat_loop())
-
-                payload_data = _format_event(event)
-                if payload_data is None:
-                    continue
-                data = json.dumps(payload_data, default=str)
-                print(data)
-                yield f"data: {data}\n\n"
-        except asyncio.CancelledError:
-            heartbeat_stop.set()
-            if heartbeat_task is not None:
-                heartbeat_task.cancel()
-            return
-        
-        finally:
-            heartbeat_stop.set()
-            if heartbeat_task is not None:
-                if not heartbeat_task.done():
-                    heartbeat_task.cancel()
-                try:
-                    await heartbeat_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception as exc:
-                    print(f"browser session heartbeat task failed: {exc}")
-        openai_conversation_id = await session._get_session_id() if session else ""
-        if openai_conversation_id:
+        async def main_agent_stream() -> None:
+            heartbeat_stop = asyncio.Event()
+            heartbeat_task: asyncio.Task | None = None
+            curr_agent = 'main'
             try:
-                await update_chat_session_by_id(
-                    session_id=effective_session_id,
-                    user_id=auth_ctx.user_id,
-                    user_jwt=auth_ctx.token,
-                    conversation_id=openai_conversation_id,
-                    title=payload.query if should_set_title else None,
-                    last_message_at=datetime.now(timezone.utc).isoformat(),
-                )
+                async for event in result.stream_events():
+                    if should_init_browser_heartbeat(controller_client, heartbeat_task, event):
+                        heartbeat_task = asyncio.create_task(heartbeat_loop(controller_client=controller_client, effective_session_id=effective_session_id, heartbeat_stop=heartbeat_stop))
+                    payload_data = _format_event(event)
+                    if payload_data is not None:
+                        curr_agent = payload_data['agent'] if payload_data['type'] == 'agent_updated' else curr_agent
+                        payload_data['agent'] = curr_agent
+                        data = json.dumps(payload_data, default=str)
+                        await event_queue.put(f"data: {data}\n\n")
+            finally:
+                heartbeat_stop.set()
+                await cleanup_heartbeat_task(heartbeat_task)
+                # Wake the SSE loop once the main stream is fully stopped/cleaned up.
+                await event_queue.put(_STREAM_END_SENTINEL)
+
+        main_agent_stream_task = asyncio.create_task(main_agent_stream())
+        try:
+            while True:
+                msg = await event_queue.get()
+                print(msg)
+                print('--------\n')
+                if msg == _STREAM_END_SENTINEL:
+                    break
+                yield msg
+        except asyncio.CancelledError:
+            main_agent_stream_task.cancel()
+            raise
+        finally:
+            if not main_agent_stream_task.done():
+                main_agent_stream_task.cancel()
+            try:
+                await main_agent_stream_task
+            except asyncio.CancelledError:
+                pass
             except Exception as exc:
-                print(f"Failed to update chat session: {exc}")
+                print(f"agent stream task failed: {traceback.format_exc()}")
+        
+        openai_conversation_id = await session._get_session_id()
+        try:
+            await update_chat_session_by_id(
+                session_id=effective_session_id,
+                user_id=auth_ctx.user_id,
+                user_jwt=auth_ctx.token,
+                conversation_id=openai_conversation_id,
+                title=payload.query if should_set_title else None,
+                last_message_at=datetime.now(timezone.utc).isoformat(),
+            )
+        except Exception as exc:
+            print(f"Failed to update chat session: {exc}")
 
         # Best-effort: clean up per-run MCP client sessions (do not touch global dev MCP server).
         try:
@@ -219,6 +236,6 @@ async def run_agent(
             print(f"browser MCP cleanup failed: {exc}")
 
         # Backwards-compatible: also emit session_id at the end.
-        yield f"data: {json.dumps({'type': 'session_id', 'session_id': effective_session_id})}\n\n"
+        # yield f"data: {json.dumps({'type': 'session_id', 'session_id': effective_session_id})}\n\n"
         yield "data: [DONE]\n\n"
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers=_SSE_HEADERS)

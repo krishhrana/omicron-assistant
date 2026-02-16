@@ -4,8 +4,10 @@ from typing import Sequence
 
 from agents import Tool, Agent, OpenAIResponsesModel, ModelSettings
 
+from app.core.enums import SupportedApps
 from app.integrations.gmail.tools import GMAIL_TOOLS, UserContext
 from app.dependencies import get_openai_client
+from app.agents.base_agent import BaseAgent
 
 
 GMAIL_SYSTEM_PROMPT = """Role:
@@ -31,14 +33,22 @@ Limitations:
 - For non-Gmail questions, answer normally without tools.
 """
 
-GMAIL_HANDOFF_DESCRIPTION = (
-    "Use for Gmail tasks: search/list/read emails and summarize results. "
-    "Read-only access; cannot send, delete, or modify emails or attachments."
-)
+GMAIL_HANDOFF_DESCRIPTION = """
+Use for Gmail tasks: search/list/read emails and summarize results.
+Read-only access; cannot send, delete, or modify emails or attachments.
+
+Can perform following actions: 
+- list unread messages.
+- search over gmail messages
+- read emails
+
+It does not have the ability to read attachments
+"""
 
 
-class GmailAgent(Agent[UserContext]):
-    name: str = "gmail_agent"
+class GmailAgent(BaseAgent[UserContext]):
+    name: str = SupportedApps.GMAIL.value
+    CAN_GATHER_USER_DATA: bool = True
 
     def __init__(
         self,
@@ -53,6 +63,9 @@ class GmailAgent(Agent[UserContext]):
             system_prompt = GMAIL_SYSTEM_PROMPT
         if handoff_description is None:
             handoff_description = GMAIL_HANDOFF_DESCRIPTION
+        
+        self.can_gather_user_data = self.CAN_GATHER_USER_DATA
+        
         super().__init__(
             name=GmailAgent.name,
             instructions=system_prompt,
