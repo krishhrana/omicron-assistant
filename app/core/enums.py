@@ -8,3 +8,4 @@ class SupportedApps(str, Enum):
     GMAIL = 'gmail'
     GOOGLE_DRIVE = 'drive'
     BROWSER = 'browser'
+    WHATSAPP = 'whatsapp'

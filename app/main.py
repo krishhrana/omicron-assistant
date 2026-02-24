@@ -5,7 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.v1.router import api_router
-from app.core.settings import get_settings
+from app.core.settings import get_settings, validate_startup_security_configuration
 from app.dependencies import shutdown, startup
 
 
@@ -20,12 +20,13 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    validate_startup_security_configuration()
     app = FastAPI(title=settings.app_title, lifespan=lifespan)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
         allow_credentials=True,
         expose_headers=["Location"],

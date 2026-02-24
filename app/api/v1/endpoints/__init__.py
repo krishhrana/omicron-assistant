@@ -1,3 +1,19 @@
-from . import gmail_auth, google_drive_auth, agent_routes, session_routes
+from . import (
+    agent_routes,
+    apps_routes,
+    gmail_auth,
+    google_drive_auth,
+    onboarding_routes,
+    session_routes,
+    whatsapp_connect,
+)
 
-__all__ = ["gmail_auth", "google_drive_auth", "agent_routes", "session_routes"]
+__all__ = [
+    "agent_routes",
+    "apps_routes",
+    "gmail_auth",
+    "google_drive_auth",
+    "onboarding_routes",
+    "session_routes",
+    "whatsapp_connect",
+]

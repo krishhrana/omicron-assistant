@@ -10,7 +10,12 @@ from openai import AsyncOpenAI
 from agents.mcp import MCPServerStreamableHttp
 from supabase import ClientOptions, create_async_client, AsyncClient
 
-from app.core.settings import get_browser_agent_settings, get_openai_settings, get_settings
+from app.core.settings import (
+    get_browser_agent_settings,
+    get_openai_settings,
+    get_settings,
+    validate_startup_security_configuration,
+)
 
 _openai_client: AsyncOpenAI | None = None
 _supabase_client: AsyncClient | None = None
@@ -19,7 +24,14 @@ _browser_mcp_server: MCPServerStreamableHttp | None = None
 logger = logging.getLogger(__name__)
 
 
-async def _is_playwright_mcp_endpoint_usable(url: str, timeout_seconds: float = 3.0) -> bool:
+def _build_bearer_headers(token: str | None) -> dict[str, str]:
+    token_value = (token or "").strip()
+    if not token_value:
+        return {}
+    return {"Authorization": f"Bearer {token_value}"}
+
+
+async def _is_streamable_mcp_endpoint_usable(url: str, timeout_seconds: float = 3.0) -> bool:
     try:
         async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
             response = await client.post(
@@ -44,16 +56,7 @@ async def init_google_tokens_encryption_key() -> None:
     settings = get_settings()
     if settings.google_tokens_encryption_key:
         return
-    if not settings.supabase_service_role_key:
-        raise RuntimeError(
-            "SUPABASE_SERVICE_ROLE_KEY is required to fetch gmail_tokens_encryption_key from Vault"
-        )
-
-    vault_client = await create_async_client(
-        settings.supabase_url, 
-        settings.supabase_service_role_key, 
-        options=ClientOptions(auto_refresh_token=False, persist_session=False)
-        )
+    vault_client = await create_supabase_service_client()
     try:
         response = await (
             vault_client.rpc(
@@ -125,7 +128,7 @@ async def init_browser_mcp_server(_: FastAPI | None = None) -> None:
         # Production uses the Browser Session Controller + lazy per-session MCP servers.
         # Keep this as an explicit local-dev fallback only.
         return
-    if not await _is_playwright_mcp_endpoint_usable(settings.playwright_mcp_url):
+    if not await _is_streamable_mcp_endpoint_usable(settings.playwright_mcp_url):
         logger.warning(
             "Playwright MCP endpoint is unreachable or invalid at %s; browser agent is disabled.",
             settings.playwright_mcp_url,
@@ -136,6 +139,7 @@ async def init_browser_mcp_server(_: FastAPI | None = None) -> None:
         name="playwright",
         params={
             "url": settings.playwright_mcp_url,
+            "headers": _build_bearer_headers(settings.playwright_mcp_auth_token),
             "timeout": settings.playwright_mcp_timeout,
             "sse_read_timeout": settings.playwright_mcp_sse_read_timeout,
         },
@@ -198,11 +202,29 @@ async def create_supabase_user_client(user_jwt: str) -> AsyncClient:
         persist_session=False,
         headers={"Authorization": f"Bearer {token}"},
     )
-    return await create_async_client(settings.supabase_url, settings.supabase_api_key, options=options)
+    return await create_async_client(
+        settings.supabase_url,
+        settings.supabase_api_key,
+        options=options,
+    )
 
 
+async def create_supabase_service_client() -> AsyncClient:
+    settings = get_settings()
+    if not settings.supabase_service_role_key:
+        raise RuntimeError(
+            "SUPABASE_SERVICE_ROLE_KEY is required for service-role Supabase access"
+        )
+    options = ClientOptions(auto_refresh_token=False, persist_session=False)
+    return await create_async_client(
+        settings.supabase_url,
+        settings.supabase_service_role_key,
+        options=options,
+    )
 
-async def startup(): 
+
+async def startup():
+    validate_startup_security_configuration()
     init_openai_client()
     await init_supabase_client()
     await init_google_tokens_encryption_key()

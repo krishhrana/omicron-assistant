@@ -1,14 +1,12 @@
 from typing import Any, Callable
 
 from app.agents.base_agent import BaseAgent
-from app.agents.orchestrator_agent import ORCHESTRATOR_SYSTEM_PROMPT, OrchestratorAgent
+from app.agents.orchestrator_agent import OrchestratorAgent
 from app.agents.registry import init_orchestrator_agent, registered_agents
 from app.core.enums import SupportedApps
-from app.core.settings import get_orchestrator_agent_settings
-from agents import ModelSettings
+from app.utils.agent_utils import UserContext
+from app.utils.browser_agent_utils import resolve_browser_credential_secret_refs
 
-
-# orch_agent_settings = get_orchestrator_agent_settings()
 
 # def get_sub_agents(connected_apps: list[SupportedApps]) -> list[BaseAgent]:
 #     connected = {app.value for app in connected_apps}
@@ -47,10 +45,11 @@ from agents import ModelSettings
 #     )
 
 
-def create_agent_workflow(
+async def create_agent_workflow(
         connected_apps: list[SupportedApps] | None = None, 
         tool_on_stream: Callable[..., Any] | None = None,
         session: Any | None = None,
+        user_ctx: UserContext | None = None,
 ):
     """
     Agent Arch: 
@@ -69,22 +68,38 @@ def create_agent_workflow(
         available_agents = [
             agent for agent in available_agents if (not agent['verify_connected']) or (agent['verify_connected'] and agent['name'] in {app.value for app in connected_apps})
         ]
-    agent_as_tools = [
-        agent['initializer']()
-        .as_tool(
-            tool_name=None, 
-            tool_description=None,
-            on_stream=tool_on_stream,
-            session=session,
-            max_turns=100
-        )
+
+    browser_credential_secret_refs = await resolve_browser_credential_secret_refs(
+        user_ctx=user_ctx,
+    )
+
+    def _init_agent(agent_attrs: dict[str, Any]) -> BaseAgent:
+        if agent_attrs["name"] == SupportedApps.BROWSER.value:
+            return agent_attrs["initializer"](
+                browser_credential_secret_refs=browser_credential_secret_refs,
+            )
+        return agent_attrs["initializer"]()
+
+    tool_agents = [
+        _init_agent(agent)
         for agent in available_agents
         if agent['can_gather_user_data']
     ]
 
+    agent_as_tools = [
+        tool_agent.as_tool(
+            tool_name=None, 
+            tool_description=None,
+            on_stream=tool_on_stream,
+            # session=session,
+            max_turns=100
+        )
+        for tool_agent in tool_agents
+    ]
+
 
     agent_as_handoffs = [
-        agent['initializer']()
+        _init_agent(agent)
         for agent in available_agents
         if agent['handoff_enabled']
         if agent['name'] != OrchestratorAgent.name
@@ -94,12 +109,15 @@ def create_agent_workflow(
         tools=agent_as_tools,
         handoffs=agent_as_handoffs,
     )
+    setattr(main_agent, "_cleanup_sub_agents", [*tool_agents, *agent_as_handoffs])
 
     for agent in agent_as_handoffs: 
         agent.handoffs = [hf for hf in agent_as_handoffs if hf.name != agent.name]
         agent.handoffs.append(main_agent)
+    print(main_agent.tools)
 
+    print('\n\n')
+
+    print(main_agent.handoffs)
     return main_agent
     
-
-

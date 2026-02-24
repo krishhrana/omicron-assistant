@@ -21,18 +21,19 @@ from openai.types.responses import ResponseReasoningSummaryTextDeltaEvent, Respo
 from app.auth import AuthContext, get_auth_context
 from app.browser_sessions.controller_client import get_controller_client
 from app.browser_sessions.lazy_mcp_server import LazyBrowserSessionMCPServer
+from app.core.enums import SupportedApps
 from app.dependencies import get_openai_client
+from app.whatsapp_sessions.lazy_mcp_server import LazyWhatsAppMCPServer
 from app.utils.agent_utils import UserContext
 from app.db.chat_sessions_sql import (
     create_chat_session_stub,
     get_chat_session,
-    get_chat_session_by_conversation_id,
-    upsert_chat_session,
     update_chat_session_by_id,
 )
+from app.db.onboarding_sql import get_connected_apps_status
 from app.schemas.endpoint_schemas.agent import AgentRunPayload
 from app.agents.workflow import create_agent_workflow
-from app.agents.registry import get_connected_apps
+from app.agents.registry import is_browser_connected, is_whatsapp_connected
 from app.utils.runtime_utils import heartbeat_loop, should_init_browser_heartbeat, cleanup_heartbeat_task
 
 
@@ -56,12 +57,12 @@ def _extract_tool_name(raw_item: Any) -> str | None:
 
 def _format_event(event: StreamEvent) -> dict[str, Any] | None:
     if event.type == "raw_response_event":
-        print(type(event.data))
+        # print(type(event.data))
         event_type = getattr(event.data, "type", None)
         if event_type == "response.output_text.delta":
             return {"type": "delta", "text": event.data.delta}
         if isinstance(event.data, ResponseReasoningSummaryTextDeltaEvent):
-            print("In Reasoning Delta")
+            # print("In Reasoning Delta")
             return {"type": "reasoning_delta", "text": event.data.delta}
         if isinstance(event.data, ResponseReasoningSummaryTextDoneEvent): 
             return {"type": "reasoning_done"}
@@ -83,12 +84,29 @@ def _format_event(event: StreamEvent) -> dict[str, Any] | None:
     return None
 
 
+async def _get_user_connected_apps(*, user_id: str, user_jwt: str) -> list[SupportedApps]:
+    connected_apps: list[SupportedApps] = []
+    app_status = await get_connected_apps_status(user_id=user_id, user_jwt=user_jwt)
+
+    if app_status.gmail:
+        connected_apps.append(SupportedApps.GMAIL)
+    if app_status.google_drive:
+        connected_apps.append(SupportedApps.GOOGLE_DRIVE)
+
+    if is_browser_connected():
+        connected_apps.append(SupportedApps.BROWSER)
+    if app_status.whatsapp and is_whatsapp_connected():
+        connected_apps.append(SupportedApps.WHATSAPP)
+
+    return connected_apps
+
+
 @router.post('/run-agent')
 async def run_agent(
     payload: AgentRunPayload,
     auth_ctx: AuthContext = Depends(get_auth_context),
 ):
-    connected_apps = get_connected_apps()
+    connected_apps = await _get_user_connected_apps(user_id=auth_ctx.user_id, user_jwt=auth_ctx.token)
     controller_client = get_controller_client()
     now_iso = datetime.now(timezone.utc).isoformat()
     event_queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -141,16 +159,12 @@ async def run_agent(
             data = json.dumps(payload_data, default=str)
             await event_queue.put(f"data: {data}\n\n")
 
-    agent = create_agent_workflow(
+    agent = await create_agent_workflow(
         connected_apps=user_ctx.connected_apps, 
         tool_on_stream=sub_agent_stream, 
-        session=session
+        session=session,
+        user_ctx=user_ctx,
     )
-
-    # agent = init_orchestrator_agent(
-    #     connected_apps=user_ctx.connected_apps,
-    #     tool_on_stream=sub_agent_stream,
-    # )
 
     result = Runner.run_streamed(
         agent,
@@ -195,8 +209,8 @@ async def run_agent(
         try:
             while True:
                 msg = await event_queue.get()
-                print(msg)
-                print('--------\n')
+                # print(msg)
+                # print('--------\n')
                 if msg == _STREAM_END_SENTINEL:
                     break
                 yield msg
@@ -226,14 +240,17 @@ async def run_agent(
         except Exception as exc:
             print(f"Failed to update chat session: {exc}")
 
-        # Best-effort: clean up per-run MCP client sessions (do not touch global dev MCP server).
+        # Best-effort: clean up per-run MCP client sessions.
         try:
-            for sub_agent in getattr(agent, "handoffs", []) or []:
+            cleanup_agents = list(getattr(agent, "_cleanup_sub_agents", []) or [])
+            if not cleanup_agents:
+                cleanup_agents = list(getattr(agent, "handoffs", []) or [])
+            for sub_agent in cleanup_agents:
                 for server in getattr(sub_agent, "mcp_servers", []) or []:
-                    if isinstance(server, LazyBrowserSessionMCPServer):
+                    if isinstance(server, (LazyBrowserSessionMCPServer, LazyWhatsAppMCPServer)):
                         await server.cleanup()
         except Exception as exc:
-            print(f"browser MCP cleanup failed: {exc}")
+            print(f"MCP cleanup failed: {exc}")
 
         # Backwards-compatible: also emit session_id at the end.
         # yield f"data: {json.dumps({'type': 'session_id', 'session_id': effective_session_id})}\n\n"

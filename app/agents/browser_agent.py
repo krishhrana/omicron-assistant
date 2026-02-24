@@ -14,7 +14,7 @@ from app.agents import BaseAgent
 
 BROWSER_SYSTEM_PROMPT = """# Role and Objective
 
-You are the **Browser Agent**: a web automation specialist that uses **Playwright MCP tools** to navigate websites and complete user-requested workflows.
+You are the **Browser Agent**: A Specialist in navigating and browsing websites
 
 Your goal is to complete the requested task safely and accurately while keeping the user in control of sensitive and irreversible actions.
 
@@ -50,9 +50,9 @@ Avoid:
 - For login flows, only enter credentials using secret placeholders supported by the environment.
 - Use `browser_fill_form` or `browser_type` with **secret key names only** (never literal credentials).
 
-Approved secret placeholders in this app include:
-- Walmart: `WALMART_USERNAME`, `WALMART_PASSWORD`
-- Portland General Electric: `PORTLAND_USERNAME`, `PORTLAND_PASSWORD`
+Approved secret placeholders for the active user are listed in the
+"Active User Browser Credential Secret Refs" section below.
+If that section has no entries, user-scoped credential placeholders are not available yet.
 
 If the task requires credentials that are not covered by known placeholders:
 - If the credential placeholders are already available, go ahead and use them.
@@ -90,6 +90,32 @@ If the user request requires connected-app actions or broader coordination:
 - Hand control back to the orchestrator with a short summary of what you observed and what needs to happen next.
 """
 
+
+def build_browser_system_prompt(
+    browser_credential_secret_refs: Sequence[str] | None = None,
+) -> str:
+    refs = [
+        ref.strip()
+        for ref in (browser_credential_secret_refs or [])
+        if isinstance(ref, str) and ref.strip()
+    ]
+    deduped_refs = list(dict.fromkeys(refs))
+
+    if deduped_refs:
+        refs_block = "\n".join(f"- {ref}" for ref in deduped_refs)
+        secret_refs_section = (
+            "## Active User Browser Credential Secret Refs\n\n"
+            "Use only these secret refs for browser login fields for the active user:\n"
+            f"{refs_block}"
+        )
+    else:
+        secret_refs_section = (
+            "## Active User Browser Credential Secret Refs\n\n"
+            "No active-user browser credential secret refs are currently available."
+        )
+
+    return f"{BROWSER_SYSTEM_PROMPT.strip()}\n\n{secret_refs_section}"
+
 BROWSER_HANDOFF_DESCRIPTION = (
     "Use for browser automation tasks with Playwright MCP: navigate websites, interact with pages, "
     "and complete guided web workflows. Handles MFA/CAPTCHA with user confirmation."
@@ -99,10 +125,12 @@ BROWSER_HANDOFF_DESCRIPTION = (
 class BrowserAgent(BaseAgent):
     name: str = SupportedApps.BROWSER.value
     HANDOFF_ENABLED: bool = True
+    CAN_GATHER_USER_DATA=False
 
     def __init__(
         self,
         system_prompt: str | None = None,
+        browser_credential_secret_refs: Sequence[str] | None = None,
         tools: Sequence[Tool] | None = None,
         model: str | None = None,
         handoff_description: str | None = None,
@@ -111,7 +139,9 @@ class BrowserAgent(BaseAgent):
         mcp_servers: Sequence[MCPServer] | None = None,
     ) -> None:
         if system_prompt is None:
-            system_prompt = BROWSER_SYSTEM_PROMPT
+            system_prompt = build_browser_system_prompt(
+                browser_credential_secret_refs=browser_credential_secret_refs,
+            )
         if handoff_description is None:
             handoff_description = BROWSER_HANDOFF_DESCRIPTION
 

@@ -54,7 +54,7 @@ class ControllerSettings(BaseSettings):
 
     # Secrets in Vault
     vault_secret_prefix: str = Field(
-        default="playwright_secrets_",
+        default="browser_secrets_",
         validation_alias="browser_runner_vault_secret_prefix",
         description="Vault secret name prefix. Full name is <prefix><user_id>.",
     )
@@ -64,4 +64,3 @@ class ControllerSettings(BaseSettings):
 
 def get_settings() -> ControllerSettings:
     return ControllerSettings()
-
