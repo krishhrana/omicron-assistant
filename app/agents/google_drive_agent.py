@@ -4,9 +4,11 @@ from typing import Sequence
 
 from agents import Agent, OpenAIResponsesModel, Tool, ModelSettings
 
+from app.core.enums import SupportedApps
 from app.integrations.google_drive.tools import GOOGLE_DRIVE_TOOLS
 from app.utils.agent_utils import UserContext
 from app.dependencies import get_openai_client
+from app.agents.base_agent import BaseAgent
 
 
 GOOGLE_DRIVE_SYSTEM_PROMPT = """Role:
@@ -152,8 +154,9 @@ GOOGLE_DRIVE_HANDOFF_DESCRIPTION = (
 )
 
 
-class GoogleDriveAgent(Agent[UserContext]):
-    name: str = "google_drive_agent"
+class GoogleDriveAgent(BaseAgent[UserContext]):
+    name: str = SupportedApps.GOOGLE_DRIVE.value
+    CAN_GATHER_USER_DATA: bool = True
 
     def __init__(
         self,
@@ -168,6 +171,9 @@ class GoogleDriveAgent(Agent[UserContext]):
             system_prompt = GOOGLE_DRIVE_SYSTEM_PROMPT
         if handoff_description is None:
             handoff_description = GOOGLE_DRIVE_HANDOFF_DESCRIPTION
+
+        self.can_gather_user_data = self.CAN_GATHER_USER_DATA
+
         super().__init__(
             name=GoogleDriveAgent.name,
             instructions=system_prompt,

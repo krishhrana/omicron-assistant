@@ -1,6 +1,10 @@
-"""Per-end-user browser session lifecycle helpers.
+from .base import BrowserRuntimeLease, BrowserSessionProvider
+from .lazy_mcp_server import LazyBrowserSessionMCPServer
+from .provider_factory import get_browser_session_provider
 
-The API integrates with an internal controller service that provisions per-session Playwright
-MCP runners keyed by Supabase `chat_sessions.id`.
-"""
-
+__all__ = [
+    "BrowserRuntimeLease",
+    "BrowserSessionProvider",
+    "LazyBrowserSessionMCPServer",
+    "get_browser_session_provider",
+]

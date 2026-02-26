@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from app.utils.encryption_utils import encrypt_token, decrypt_token
 from app.dependencies import create_supabase_user_client
@@ -10,6 +11,10 @@ class GmailCreds:
     access_token: str | None
     refresh_token: str | None
     status: str | None
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 async def upsert_gmail_connection(
@@ -98,5 +103,30 @@ async def list_gmail_users(user_jwt: str, limit: int = 100):
     try:
         response = await client.table("gmail_connections").select("*").limit(limit).execute()
         return response.data if response else []
+    finally:
+        await client.postgrest.aclose()
+
+
+async def disconnect_gmail_connection(*, user_id: str, user_jwt: str) -> bool:
+    client = await create_supabase_user_client(user_jwt)
+    try:
+        response = await (
+            client.table("gmail_connections")
+            .update(
+                {
+                    "status": "disconnected",
+                    "revoked_at": _utc_now_iso(),
+                    "access_token": None,
+                    "refresh_token_encrypted": None,
+                    "access_token_expires_at": None,
+                }
+            )
+            .eq("user_id", user_id)
+            .execute()
+        )
+        data = response.data if response else None
+        if isinstance(data, list):
+            return len(data) > 0
+        return bool(data)
     finally:
         await client.postgrest.aclose()

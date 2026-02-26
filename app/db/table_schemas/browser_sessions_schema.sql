@@ -1,15 +1,18 @@
+-- Browser MCP runtime leases (current local-first architecture).
+-- One active lease per (user_id, chat_session_id).
 CREATE TABLE IF NOT EXISTS public.browser_sessions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     chat_session_id uuid NOT NULL REFERENCES public.chat_sessions(id) ON DELETE CASCADE,
+    runtime_id text,
     status text NOT NULL DEFAULT 'starting'
         CHECK (status IN ('starting', 'ready', 'ended', 'error')),
     mcp_url text,
-    namespace text,
-    pod_name text,
-    service_name text,
-    artifacts_s3_prefix text,
     claim_id uuid,
+    error_code text,
+    error_message text,
+    connected_at timestamptz,
+    ended_at timestamptz,
     expires_at timestamptz NOT NULL,
     last_used_at timestamptz NOT NULL DEFAULT now(),
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -24,6 +27,9 @@ CREATE INDEX IF NOT EXISTS idx_browser_sessions_expires_at
 
 CREATE INDEX IF NOT EXISTS idx_browser_sessions_status
     ON public.browser_sessions(status);
+
+CREATE INDEX IF NOT EXISTS idx_browser_sessions_runtime_id
+    ON public.browser_sessions(runtime_id);
 
 CREATE OR REPLACE FUNCTION public.set_updated_at()
 RETURNS trigger
@@ -43,6 +49,5 @@ EXECUTE FUNCTION public.set_updated_at();
 
 ALTER TABLE public.browser_sessions ENABLE ROW LEVEL SECURITY;
 
--- Intentionally no RLS policies: this table is controller-owned. The controller uses service role
--- (bypasses RLS); normal user JWTs should not be able to read/write these rows.
-
+-- Intentionally no RLS policies: this table is runtime-manager owned.
+-- Runtime manager uses service role (bypasses RLS); normal user JWTs should not read/write this table.

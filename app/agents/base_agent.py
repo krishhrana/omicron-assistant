@@ -1,38 +1,35 @@
 from __future__ import annotations
 
 from abc import ABC
-from typing import Generic, Sequence, TypeVar
+from typing import Generic, TypeVar
 
-from agents import Agent, Tool
+from agents import Agent
 
 
 TContext = TypeVar("TContext")
 
 
-class BaseAgent(ABC, Generic[TContext]):
-    def __init__(
-        self,
-        *,
-        name: str,
-        instructions: str,
-        tools: Sequence[Tool] | None = None,
-        model: str | None = None,
-        handoff_description: str | None = None,
-        handoffs: Sequence[str] | None = None,
-    ) -> None:
-        self.name = name
-        self.instructions = instructions
-        self.tools = list(tools) if tools else []
-        self.model = model
-        self.handoff_description = handoff_description
-        self.handoffs = handoffs
+class BaseAgent(ABC, Agent[TContext], Generic[TContext]):
+    # Class-level capability flags (usable without instantiating the agent).
+    CAN_GATHER_USER_DATA: bool = False
+    HANDOFF_ENABLED: bool = False
 
-    def build(self) -> Agent[TContext]:
-        return Agent(
-            name=self.name,
-            instructions=self.instructions,
-            tools=list(self.tools),
-            model=self.model,
-            handoff_description=self.handoff_description,
-            handoffs=self.handoffs
-        )
+    @property
+    def can_gather_user_data(self) -> bool:
+        return getattr(self, "_can_gather_user_data", self.CAN_GATHER_USER_DATA)
+    
+    @property
+    def handoff_enabled(self) -> bool: 
+        return getattr(self, "_handoff_enabled", self.HANDOFF_ENABLED)
+
+    @can_gather_user_data.setter
+    def can_gather_user_data(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("can_gather_user_data must be a bool")
+        self._can_gather_user_data = value
+
+    @handoff_enabled.setter
+    def handoff_enabled(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("handoff_enabled must be a bool")
+        self._handoff_enabled = value
