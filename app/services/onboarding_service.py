@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -323,10 +324,14 @@ async def delete_browser_credential(*, user_id: str, site_key: str) -> bool:
 
 
 async def get_onboarding_state(*, user_id: str, user_jwt: str) -> dict[str, Any]:
-    profile = await get_user_profile(user_id=user_id, user_jwt=user_jwt)
-    onboarding_row = await get_user_onboarding(user_id=user_id, user_jwt=user_jwt)
-    connected_apps = await get_connected_apps_status(user_id=user_id, user_jwt=user_jwt)
-    browser_credentials_payload = await list_browser_credentials(user_id=user_id)
+    profile, onboarding_row, connected_apps, browser_credentials_payload = (
+        await asyncio.gather(
+            get_user_profile(user_id=user_id, user_jwt=user_jwt),
+            get_user_onboarding(user_id=user_id, user_jwt=user_jwt),
+            get_connected_apps_status(user_id=user_id, user_jwt=user_jwt),
+            list_browser_credentials(user_id=user_id),
+        )
+    )
     browser_credentials = browser_credentials_payload.get("sites", [])
 
     profile_complete = _profile_complete(profile)

@@ -19,7 +19,6 @@ from agents.stream_events import StreamEvent
 from openai.types.responses import ResponseReasoningSummaryTextDeltaEvent, ResponseReasoningSummaryTextDoneEvent
 
 from app.auth import AuthContext, get_auth_context
-from app.browser_sessions.controller_client import get_controller_client
 from app.browser_sessions.lazy_mcp_server import LazyBrowserSessionMCPServer
 from app.core.enums import SupportedApps
 from app.dependencies import get_openai_client
@@ -34,7 +33,6 @@ from app.db.onboarding_sql import get_connected_apps_status
 from app.schemas.endpoint_schemas.agent import AgentRunPayload
 from app.agents.workflow import create_agent_workflow
 from app.agents.registry import is_browser_connected, is_whatsapp_connected
-from app.utils.runtime_utils import heartbeat_loop, should_init_browser_heartbeat, cleanup_heartbeat_task
 
 
 
@@ -107,7 +105,6 @@ async def run_agent(
     auth_ctx: AuthContext = Depends(get_auth_context),
 ):
     connected_apps = await _get_user_connected_apps(user_id=auth_ctx.user_id, user_jwt=auth_ctx.token)
-    controller_client = get_controller_client()
     now_iso = datetime.now(timezone.utc).isoformat()
     event_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -186,13 +183,9 @@ async def run_agent(
 
 
         async def main_agent_stream() -> None:
-            heartbeat_stop = asyncio.Event()
-            heartbeat_task: asyncio.Task | None = None
             curr_agent = 'main'
             try:
                 async for event in result.stream_events():
-                    if should_init_browser_heartbeat(controller_client, heartbeat_task, event):
-                        heartbeat_task = asyncio.create_task(heartbeat_loop(controller_client=controller_client, effective_session_id=effective_session_id, heartbeat_stop=heartbeat_stop))
                     payload_data = _format_event(event)
                     if payload_data is not None:
                         curr_agent = payload_data['agent'] if payload_data['type'] == 'agent_updated' else curr_agent
@@ -200,8 +193,6 @@ async def run_agent(
                         data = json.dumps(payload_data, default=str)
                         await event_queue.put(f"data: {data}\n\n")
             finally:
-                heartbeat_stop.set()
-                await cleanup_heartbeat_task(heartbeat_task)
                 # Wake the SSE loop once the main stream is fully stopped/cleaned up.
                 await event_queue.put(_STREAM_END_SENTINEL)
 

@@ -8,19 +8,16 @@ from app.agents.gmail_agent import GmailAgent
 from app.agents.google_drive_agent import GoogleDriveAgent
 from app.agents.orchestrator_agent import OrchestratorAgent
 from app.agents.whatsapp_agent import WhatsAppAgent
-from app.browser_sessions.controller_client import get_controller_client
 from app.browser_sessions.lazy_mcp_server import LazyBrowserSessionMCPServer
 from app.core.enums import SupportedApps
 from app.core.settings import (
     get_browser_agent_settings,
-    get_browser_session_controller_settings,
     get_gmail_agent_settings,
     get_google_drive_agent_settings,
     get_orchestrator_agent_settings,
     get_whatsapp_session_settings,
     get_whatsapp_agent_settings,
 )
-from app.dependencies import get_browser_mcp_server
 from app.whatsapp_sessions import get_whatsapp_session_provider
 from app.whatsapp_sessions.lazy_mcp_server import LazyWhatsAppMCPServer
 
@@ -39,7 +36,6 @@ google_drive_agent_settings = get_google_drive_agent_settings()
 browser_agent_settings = get_browser_agent_settings()
 whatsapp_agent_settings = get_whatsapp_agent_settings()
 whatsapp_session_settings = get_whatsapp_session_settings()
-browser_session_controller_settings = get_browser_session_controller_settings()
 orch_agent_settings = get_orchestrator_agent_settings()
 
 
@@ -76,7 +72,6 @@ def init_browser_agent(
     handoffs: List[BaseAgent] | None = None,
     browser_credential_secret_refs: list[str] | None = None,
 ) -> BrowserAgent:
-    controller = get_controller_client()
     return BrowserAgent(
         browser_credential_secret_refs=browser_credential_secret_refs,
         model=browser_agent_settings.model,
@@ -88,19 +83,15 @@ def init_browser_agent(
                 }
             }
         ),
-        mcp_servers=(
-            [
-                LazyBrowserSessionMCPServer(
-                    controller=controller,
-                    mcp_timeout=browser_agent_settings.playwright_mcp_timeout,
-                    mcp_sse_read_timeout=browser_agent_settings.playwright_mcp_sse_read_timeout,
-                    client_session_timeout_seconds=browser_agent_settings.playwright_mcp_client_session_timeout_seconds,
-                    max_retry_attempts=browser_agent_settings.playwright_mcp_max_retry_attempts,
-                )
-            ]
-            if controller is not None
-            else [get_browser_mcp_server()]
-        ),
+        mcp_servers=[
+            LazyBrowserSessionMCPServer(
+                default_mcp_url=browser_agent_settings.playwright_mcp_url or "",
+                mcp_timeout=browser_agent_settings.playwright_mcp_timeout,
+                mcp_sse_read_timeout=browser_agent_settings.playwright_mcp_sse_read_timeout,
+                client_session_timeout_seconds=browser_agent_settings.playwright_mcp_client_session_timeout_seconds,
+                max_retry_attempts=browser_agent_settings.playwright_mcp_max_retry_attempts,
+            )
+        ],
         handoffs=handoffs,
     )
 
@@ -152,13 +143,7 @@ def init_orchestrator_agent(
 
 
 def is_browser_connected() -> bool:
-    if browser_session_controller_settings.url and browser_session_controller_settings.jwt_secret:
-        return True
-    try:
-        get_browser_mcp_server()
-        return True
-    except RuntimeError:
-        return False
+    return bool((browser_agent_settings.playwright_mcp_url or "").strip())
 
 
 def is_whatsapp_connected() -> bool:

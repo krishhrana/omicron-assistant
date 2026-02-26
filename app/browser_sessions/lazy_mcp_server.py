@@ -8,19 +8,17 @@ from agents.mcp import MCPServer, MCPServerStreamableHttp
 from mcp import Tool as MCPTool
 from mcp.types import CallToolResult, GetPromptResult, ListPromptsResult
 
-from app.browser_sessions.controller_client import BrowserSessionControllerClient
-
 if TYPE_CHECKING:
     from agents.agent import AgentBase
 
 
 class LazyBrowserSessionMCPServer(MCPServer):
-    """Lazy MCP server that provisions/connects on first tool listing."""
+    """Lazy MCP server that connects to a configured browser MCP endpoint on first tool listing."""
 
     def __init__(
         self,
         *,
-        controller: BrowserSessionControllerClient,
+        default_mcp_url: str,
         name: str = "playwright",
         mcp_timeout: float = 120,
         mcp_sse_read_timeout: float = 600,
@@ -28,7 +26,7 @@ class LazyBrowserSessionMCPServer(MCPServer):
         max_retry_attempts: int = 2,
     ) -> None:
         super().__init__(use_structured_content=False)
-        self._controller = controller
+        self._default_mcp_url = default_mcp_url.strip()
         self._name = name
         self._mcp_timeout = mcp_timeout
         self._mcp_sse_read_timeout = mcp_sse_read_timeout
@@ -43,7 +41,7 @@ class LazyBrowserSessionMCPServer(MCPServer):
         return self._name
 
     async def connect(self):
-        # No-op: we connect only once we have run_context (user + session id).
+        # No-op: connect lazily on first list_tools() call.
         return
 
     async def _ensure_connected(self, run_context: RunContextWrapper[Any]) -> MCPServerStreamableHttp:
@@ -54,22 +52,18 @@ class LazyBrowserSessionMCPServer(MCPServer):
             if self._server is not None:
                 return self._server
 
-            ctx = run_context.context
-            user_id = getattr(ctx, "user_id", None)
-            session_id = getattr(ctx, "session_id", None)
-            if not user_id:
-                raise RuntimeError("Missing user_id in run_context for browser MCP provisioning")
-            if not session_id:
-                raise RuntimeError("Missing session_id in run_context for browser MCP provisioning")
-
-            lease = await self._controller.get_or_create(user_id=user_id, session_id=session_id)
+            _ = run_context
+            mcp_url = self._default_mcp_url
+            if not mcp_url:
+                raise RuntimeError("Missing Browser MCP URL")
+            params: dict[str, Any] = {
+                "url": mcp_url,
+                "timeout": self._mcp_timeout,
+                "sse_read_timeout": self._mcp_sse_read_timeout,
+            }
             server = MCPServerStreamableHttp(
                 name=self._name,
-                params={
-                    "url": lease.mcp_url,
-                    "timeout": self._mcp_timeout,
-                    "sse_read_timeout": self._mcp_sse_read_timeout,
-                },
+                params=params,
                 cache_tools_list=True,
                 client_session_timeout_seconds=self._client_session_timeout_seconds,
                 max_retry_attempts=self._max_retry_attempts,
@@ -110,4 +104,3 @@ class LazyBrowserSessionMCPServer(MCPServer):
         if self._server is None:
             raise RuntimeError("Browser MCP server not connected yet.")
         return await self._server.get_prompt(name, arguments)
-

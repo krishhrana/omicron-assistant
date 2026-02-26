@@ -1,17 +1,12 @@
 from __future__ import annotations
-import asyncio
-import contextlib
-import logging
 
+from agents import set_tracing_export_api_key
 from fastapi import FastAPI
-import httpx
 from openai import AsyncOpenAI
 
-from agents.mcp import MCPServerStreamableHttp
 from supabase import ClientOptions, create_async_client, AsyncClient
 
 from app.core.settings import (
-    get_browser_agent_settings,
     get_openai_settings,
     get_settings,
     validate_startup_security_configuration,
@@ -19,37 +14,6 @@ from app.core.settings import (
 
 _openai_client: AsyncOpenAI | None = None
 _supabase_client: AsyncClient | None = None
-_browser_mcp_server: MCPServerStreamableHttp | None = None
-
-logger = logging.getLogger(__name__)
-
-
-def _build_bearer_headers(token: str | None) -> dict[str, str]:
-    token_value = (token or "").strip()
-    if not token_value:
-        return {}
-    return {"Authorization": f"Bearer {token_value}"}
-
-
-async def _is_streamable_mcp_endpoint_usable(url: str, timeout_seconds: float = 3.0) -> bool:
-    try:
-        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
-            response = await client.post(
-                url,
-                json={"jsonrpc": "2.0", "id": "probe", "method": "ping", "params": {}},
-                headers={
-                    "Accept": "application/json, text/event-stream",
-                    "Content-Type": "application/json",
-                },
-            )
-    except Exception:
-        return False
-
-    if response.status_code >= 500:
-        return False
-    if response.status_code in {404, 405, 501}:
-        return False
-    return True
 
 
 async def init_google_tokens_encryption_key() -> None:
@@ -79,6 +43,7 @@ async def init_google_tokens_encryption_key() -> None:
 def init_openai_client(_: FastAPI | None = None) -> None:
     global _openai_client
     settings = get_openai_settings()
+    set_tracing_export_api_key(settings.api_key)
     if _openai_client is None:
         _openai_client = AsyncOpenAI(
             api_key=settings.api_key,
@@ -114,75 +79,6 @@ async def close_supabase_client():
     if client is not None:
         await client.postgrest.aclose()
     _supabase_client = None
-
-
-async def init_browser_mcp_server(_: FastAPI | None = None) -> None:
-    global _browser_mcp_server
-    if _browser_mcp_server is not None:
-        return
-
-    settings = get_browser_agent_settings()
-    if not settings.playwright_mcp_url:
-        return
-    if not settings.playwright_mcp_connect_on_startup:
-        # Production uses the Browser Session Controller + lazy per-session MCP servers.
-        # Keep this as an explicit local-dev fallback only.
-        return
-    if not await _is_streamable_mcp_endpoint_usable(settings.playwright_mcp_url):
-        logger.warning(
-            "Playwright MCP endpoint is unreachable or invalid at %s; browser agent is disabled.",
-            settings.playwright_mcp_url,
-        )
-        return
-
-    server = MCPServerStreamableHttp(
-        name="playwright",
-        params={
-            "url": settings.playwright_mcp_url,
-            "headers": _build_bearer_headers(settings.playwright_mcp_auth_token),
-            "timeout": settings.playwright_mcp_timeout,
-            "sse_read_timeout": settings.playwright_mcp_sse_read_timeout,
-        },
-        cache_tools_list=True,
-        client_session_timeout_seconds=settings.playwright_mcp_client_session_timeout_seconds,
-        max_retry_attempts=settings.playwright_mcp_max_retry_attempts,
-    )
-
-    try:
-        await server.connect()
-    except BaseException as exc:
-        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-            raise
-        logger.warning(
-            "Failed to connect to Playwright MCP server at %s: %s",
-            settings.playwright_mcp_url,
-            exc,
-        )
-        if isinstance(exc, asyncio.CancelledError):
-            return
-        with contextlib.suppress(Exception):
-            await server.cleanup()
-        return
-
-    _browser_mcp_server = server
-
-
-async def close_browser_mcp_server() -> None:
-    global _browser_mcp_server
-    server = _browser_mcp_server
-    if server is not None:
-        await server.cleanup()
-    _browser_mcp_server = None
-
-
-def get_browser_mcp_server() -> MCPServerStreamableHttp:
-    if _browser_mcp_server is None:
-        raise RuntimeError(
-            "Browser MCP server not initialized. Set PLAYWRIGHT_MCP_URL and "
-            "PLAYWRIGHT_MCP_CONNECT_ON_STARTUP=true (local dev) and ensure the MCP server is reachable."
-        )
-    return _browser_mcp_server
-
 
 def get_supabase_client() -> AsyncClient:
     if _supabase_client is None:
@@ -228,11 +124,9 @@ async def startup():
     init_openai_client()
     await init_supabase_client()
     await init_google_tokens_encryption_key()
-    await init_browser_mcp_server()
 
 
 async def shutdown(): 
-    await close_browser_mcp_server()
     await close_openai_client()
     await close_supabase_client()
     

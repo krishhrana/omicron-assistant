@@ -136,13 +136,27 @@ class BrowserAgentSettings(BaseSettings):
         default=2,
         validation_alias='playwright_mcp_max_retry_attempts',
     )
-    playwright_mcp_connect_on_startup: bool = Field(
-        default=False,
-        validation_alias="playwright_mcp_connect_on_startup",
-    )
-    playwright_mcp_auth_token: str | None = Field(
+
+    model_config = settings_config
+
+
+class BrowserSessionSettings(BaseSettings):
+    provider: str = Field(default="local", validation_alias="browser_session_provider")
+    controller_url: str | None = Field(
         default=None,
-        validation_alias="playwright_mcp_auth_token",
+        validation_alias="browser_session_controller_url",
+    )
+    controller_jwt_secret: str | None = Field(
+        default=None,
+        validation_alias="browser_session_controller_jwt_secret",
+    )
+    controller_jwt_audience: str = Field(
+        default="browser-session-controller",
+        validation_alias="browser_session_controller_jwt_audience",
+    )
+    controller_timeout_seconds: float = Field(
+        default=10.0,
+        validation_alias="browser_session_controller_timeout_seconds",
     )
 
     model_config = settings_config
@@ -235,24 +249,6 @@ class WhatsAppSessionSettings(BaseSettings):
     model_config = settings_config
 
 
-class BrowserSessionControllerSettings(BaseSettings):
-    # Internal controller that provisions per-session Playwright MCP runners.
-    url: str | None = Field(default=None, validation_alias="browser_session_controller_url")
-    jwt_secret: str | None = Field(
-        default=None,
-        validation_alias="browser_session_controller_jwt_secret",
-    )
-    jwt_audience: str = Field(
-        default="browser-session-controller",
-        validation_alias="browser_session_controller_jwt_audience",
-    )
-    timeout_seconds: float = Field(
-        default=10.0,
-        validation_alias="browser_session_controller_timeout_seconds",
-    )
-
-    model_config = settings_config
-
 
 class StartupConfigError(RuntimeError):
     """Raised when required runtime security configuration is missing."""
@@ -268,7 +264,6 @@ def validate_startup_security_configuration() -> None:
     browser_agent = get_browser_agent_settings()
     whatsapp_agent = get_whatsapp_agent_settings()
     whatsapp_session = get_whatsapp_session_settings()
-    browser_controller = get_browser_session_controller_settings()
 
     errors: list[str] = []
 
@@ -301,24 +296,10 @@ def validate_startup_security_configuration() -> None:
             "WHATSAPP_SESSION_CONTROLLER_URL is required when WHATSAPP_SESSION_CONTROLLER_JWT_SECRET is configured."
         )
 
-    if _is_non_empty(browser_controller.url) and not _is_non_empty(browser_controller.jwt_secret):
+    if not _is_non_empty(browser_agent.playwright_mcp_url):
         errors.append(
-            "BROWSER_SESSION_CONTROLLER_JWT_SECRET is required when BROWSER_SESSION_CONTROLLER_URL is configured."
+            "PLAYWRIGHT_MCP_URL is required."
         )
-    if _is_non_empty(browser_controller.jwt_secret) and not _is_non_empty(browser_controller.url):
-        errors.append(
-            "BROWSER_SESSION_CONTROLLER_URL is required when BROWSER_SESSION_CONTROLLER_JWT_SECRET is configured."
-        )
-
-    if browser_agent.playwright_mcp_connect_on_startup:
-        if not _is_non_empty(browser_agent.playwright_mcp_url):
-            errors.append(
-                "PLAYWRIGHT_MCP_URL is required when PLAYWRIGHT_MCP_CONNECT_ON_STARTUP=true."
-            )
-        if not _is_non_empty(browser_agent.playwright_mcp_auth_token):
-            errors.append(
-                "PLAYWRIGHT_MCP_AUTH_TOKEN is required when PLAYWRIGHT_MCP_CONNECT_ON_STARTUP=true."
-            )
 
     if whatsapp_agent.whatsapp_mcp_connect_on_startup:
         if not _is_non_empty(whatsapp_agent.whatsapp_mcp_url):
@@ -394,5 +375,5 @@ def get_whatsapp_session_settings() -> WhatsAppSessionSettings:
 
 
 @lru_cache(1)
-def get_browser_session_controller_settings() -> BrowserSessionControllerSettings:
-    return BrowserSessionControllerSettings()
+def get_browser_session_settings() -> BrowserSessionSettings:
+    return BrowserSessionSettings()

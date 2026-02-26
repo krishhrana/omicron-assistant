@@ -45,8 +45,6 @@ specialist agents; current focus is Gmail, Google Drive, browser automation, and
 - `ORCHESTRATOR_AGENT_*`, `GMAIL_AGENT_*`, `GOOGLE_DRIVE_AGENT_*`, `BROWSER_AGENT_*`: model + reasoning settings.
 - `PLAYWRIGHT_MCP_URL`: Streamable HTTP MCP endpoint (example: `http://localhost:8080/mcp`).
 - `PLAYWRIGHT_MCP_TIMEOUT`, `PLAYWRIGHT_MCP_SSE_READ_TIMEOUT`, `PLAYWRIGHT_MCP_CLIENT_SESSION_TIMEOUT_SECONDS`, `PLAYWRIGHT_MCP_MAX_RETRY_ATTEMPTS`: browser MCP connection tuning.
-- `PLAYWRIGHT_MCP_CONNECT_ON_STARTUP`: local-dev only; when `true`, connect a global Playwright MCP server on API startup.
-- `PLAYWRIGHT_MCP_AUTH_TOKEN`: required when `PLAYWRIGHT_MCP_CONNECT_ON_STARTUP=true`.
 - `WHATSAPP_AGENT_*`: model + reasoning settings for the WhatsApp specialist agent.
 - `WHATSAPP_MCP_URL`: Streamable HTTP WhatsApp MCP endpoint (default: `http://127.0.0.1:8000/mcp`).
 - `WHATSAPP_MCP_TIMEOUT`, `WHATSAPP_MCP_SSE_READ_TIMEOUT`, `WHATSAPP_MCP_CLIENT_SESSION_TIMEOUT_SECONDS`, `WHATSAPP_MCP_MAX_RETRY_ATTEMPTS`: WhatsApp MCP connection tuning.
@@ -58,7 +56,6 @@ specialist agents; current focus is Gmail, Google Drive, browser automation, and
   internal JWTs for both WhatsApp MCP and bridge control-plane calls.
 - `WHATSAPP_BRIDGE_JWT_AUDIENCE`, `WHATSAPP_BRIDGE_JWT_ISSUER`, `WHATSAPP_BRIDGE_JWT_TTL_SECONDS`:
   shared internal JWT claim controls.
-- `BROWSER_SESSION_CONTROLLER_URL`, `BROWSER_SESSION_CONTROLLER_JWT_SECRET`, `BROWSER_SESSION_CONTROLLER_JWT_AUDIENCE`, `BROWSER_SESSION_CONTROLLER_TIMEOUT_SECONDS`: production path for lazy per-session Playwright MCP runners (controller provisions runner Pods keyed by Supabase `chat_sessions.id`).
 
 Note: scope lists must be valid JSON arrays, e.g.
 `GMAIL_SCOPES=["https://www.googleapis.com/auth/gmail.readonly"]`.

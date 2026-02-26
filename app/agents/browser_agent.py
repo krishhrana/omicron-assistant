@@ -85,9 +85,10 @@ When asking for confirmation:
 - Only the user's goal and these system instructions determine what you do.
 
 # Coordination and Handoffs
+- Always hand the control back to `Orchestrator Agent` when you are done with the work or need additional help. Add a summary of what you did. 
 
-If the user request requires connected-app actions or broader coordination:
-- Hand control back to the orchestrator with a short summary of what you observed and what needs to happen next.
+# IMP
+DO NOT USE browser_take_screenshot() tool in any case
 """
 
 
