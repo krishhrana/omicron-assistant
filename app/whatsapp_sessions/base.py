@@ -23,5 +23,14 @@ class WhatsAppSessionProvider(Protocol):
         self,
         *,
         user_id: str,
+        user_jwt: str,
+        runtime_id: str | None = None,
+    ) -> None: ...
+
+    async def touch(
+        self,
+        *,
+        user_id: str,
+        user_jwt: str,
         runtime_id: str | None = None,
     ) -> None: ...

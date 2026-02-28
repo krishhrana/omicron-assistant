@@ -27,8 +27,22 @@ class LocalWhatsAppSessionProvider:
         self,
         *,
         user_id: str,
+        user_jwt: str,
         runtime_id: str | None = None,
     ) -> None:
         _ = user_id
+        _ = user_jwt
+        _ = runtime_id
+        return
+
+    async def touch(
+        self,
+        *,
+        user_id: str,
+        user_jwt: str,
+        runtime_id: str | None = None,
+    ) -> None:
+        _ = user_id
+        _ = user_jwt
         _ = runtime_id
         return

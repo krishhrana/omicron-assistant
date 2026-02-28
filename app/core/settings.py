@@ -241,6 +241,14 @@ class WhatsAppSessionSettings(BaseSettings):
         default="whatsapp-session-controller",
         validation_alias="whatsapp_session_controller_jwt_audience",
     )
+    controller_jwt_issuer: str = Field(
+        default="omicron-api",
+        validation_alias="whatsapp_session_controller_jwt_issuer",
+    )
+    controller_jwt_ttl_seconds: int = Field(
+        default=60,
+        validation_alias="whatsapp_session_controller_jwt_ttl_seconds",
+    )
     controller_timeout_seconds: float = Field(
         default=10.0,
         validation_alias="whatsapp_session_controller_timeout_seconds",
@@ -289,6 +297,18 @@ def validate_startup_security_configuration() -> None:
         if not _is_non_empty(whatsapp_session.controller_jwt_secret):
             errors.append(
                 "WHATSAPP_SESSION_CONTROLLER_JWT_SECRET is required when WHATSAPP_SESSION_PROVIDER=controller."
+            )
+        if not _is_non_empty(whatsapp_session.controller_jwt_audience):
+            errors.append(
+                "WHATSAPP_SESSION_CONTROLLER_JWT_AUDIENCE is required when WHATSAPP_SESSION_PROVIDER=controller."
+            )
+        if not _is_non_empty(whatsapp_session.controller_jwt_issuer):
+            errors.append(
+                "WHATSAPP_SESSION_CONTROLLER_JWT_ISSUER is required when WHATSAPP_SESSION_PROVIDER=controller."
+            )
+        if whatsapp_session.controller_jwt_ttl_seconds <= 0:
+            errors.append(
+                "WHATSAPP_SESSION_CONTROLLER_JWT_TTL_SECONDS must be greater than 0."
             )
 
     if _is_non_empty(whatsapp_session.controller_jwt_secret) and not _is_non_empty(whatsapp_session.controller_url):

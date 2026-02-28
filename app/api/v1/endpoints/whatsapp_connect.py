@@ -13,6 +13,7 @@ from app.db.whatsapp_sql import get_whatsapp_connection, upsert_whatsapp_connect
 from app.schemas.endpoint_schemas.whatsapp_connect import (
     WhatsAppConnectStatusResponse,
     WhatsAppDisconnectResponse,
+    WhatsAppPrewarmResponse,
 )
 from app.whatsapp_sessions import WhatsAppRuntimeLease, get_whatsapp_session_provider
 from app.whatsapp_sessions.bridge_auth import WhatsAppBridgeAuthError, mint_bridge_bearer_header
@@ -230,6 +231,26 @@ async def _sync_connection_snapshot(
     )
 
 
+async def _refresh_runtime_lease_best_effort(
+    *,
+    provider: Any,
+    auth_ctx: AuthContext,
+    lease: WhatsAppRuntimeLease,
+) -> None:
+    touch = getattr(provider, "touch", None)
+    if touch is None:
+        return
+    try:
+        await touch(
+            user_id=auth_ctx.user_id,
+            user_jwt=auth_ctx.token,
+            runtime_id=lease.runtime_id,
+        )
+    except Exception:
+        # Lease-refresh failures should not fail user-visible connect/status responses.
+        return
+
+
 @router.post("/whatsapp/connect/start", response_model=WhatsAppConnectStatusResponse)
 async def whatsapp_connect_start(
     auth_ctx: AuthContext = Depends(get_auth_context),
@@ -254,7 +275,9 @@ async def whatsapp_connect_start(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     await _request_bridge_connect(lease, auth_headers=connect_headers)
     bridge_payload = await _fetch_bridge_status(lease, auth_headers=status_headers)
-    return await _sync_connection_snapshot(auth_ctx=auth_ctx, lease=lease, bridge_payload=bridge_payload)
+    response = await _sync_connection_snapshot(auth_ctx=auth_ctx, lease=lease, bridge_payload=bridge_payload)
+    await _refresh_runtime_lease_best_effort(provider=provider, auth_ctx=auth_ctx, lease=lease)
+    return response
 
 
 @router.get("/whatsapp/connect/status", response_model=WhatsAppConnectStatusResponse)
@@ -275,7 +298,9 @@ async def whatsapp_connect_status(
     except WhatsAppBridgeAuthError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     bridge_payload = await _fetch_bridge_status(lease, auth_headers=status_headers)
-    return await _sync_connection_snapshot(auth_ctx=auth_ctx, lease=lease, bridge_payload=bridge_payload)
+    response = await _sync_connection_snapshot(auth_ctx=auth_ctx, lease=lease, bridge_payload=bridge_payload)
+    await _refresh_runtime_lease_best_effort(provider=provider, auth_ctx=auth_ctx, lease=lease)
+    return response
 
 
 @router.post("/whatsapp/connect/disconnect", response_model=WhatsAppDisconnectResponse)
@@ -298,7 +323,11 @@ async def whatsapp_connect_disconnect(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     await _request_bridge_revoke_disconnect(lease, auth_headers=disconnect_headers)
 
-    await provider.disconnect(user_id=auth_ctx.user_id, runtime_id=lease.runtime_id)
+    await provider.disconnect(
+        user_id=auth_ctx.user_id,
+        user_jwt=auth_ctx.token,
+        runtime_id=lease.runtime_id,
+    )
 
     previous = await get_whatsapp_connection(user_id=auth_ctx.user_id, user_jwt=auth_ctx.token)
     connected_at = (
@@ -328,3 +357,35 @@ async def whatsapp_connect_disconnect(
             ),
         ) from exc
     return WhatsAppDisconnectResponse(ok=True, status="logged_out")
+
+
+@router.post("/whatsapp/runtime/prewarm", response_model=WhatsAppPrewarmResponse)
+async def whatsapp_runtime_prewarm(
+    auth_ctx: AuthContext = Depends(get_auth_context),
+) -> WhatsAppPrewarmResponse:
+    existing = await get_whatsapp_connection(user_id=auth_ctx.user_id, user_jwt=auth_ctx.token)
+    connection_status = (
+        str(existing.get("status") or "").strip().lower()
+        if isinstance(existing, dict)
+        else ""
+    )
+    if connection_status != "connected":
+        return WhatsAppPrewarmResponse(
+            ok=True,
+            prewarmed=False,
+            reason="not_connected",
+        )
+
+    provider = get_whatsapp_session_provider()
+    try:
+        lease = await provider.get_or_create(user_id=auth_ctx.user_id, user_jwt=auth_ctx.token)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    await _refresh_runtime_lease_best_effort(provider=provider, auth_ctx=auth_ctx, lease=lease)
+    return WhatsAppPrewarmResponse(
+        ok=True,
+        prewarmed=True,
+        reason="connected_user",
+        runtime_id=lease.runtime_id,
+    )

@@ -23,3 +23,11 @@ class WhatsAppDisconnectResponse(BaseModel):
     ok: bool
     provider: str = "whatsapp"
     status: str
+
+
+class WhatsAppPrewarmResponse(BaseModel):
+    ok: bool
+    provider: str = "whatsapp"
+    prewarmed: bool
+    reason: str | None = None
+    runtime_id: str | None = None
