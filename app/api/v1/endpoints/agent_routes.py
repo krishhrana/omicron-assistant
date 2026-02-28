@@ -238,7 +238,7 @@ async def run_agent(
                 cleanup_agents = list(getattr(agent, "handoffs", []) or [])
             for sub_agent in cleanup_agents:
                 for server in getattr(sub_agent, "mcp_servers", []) or []:
-                    if isinstance(server, (LazyBrowserSessionMCPServer, LazyWhatsAppMCPServer)):
+                    if isinstance(server, (LazyWhatsAppMCPServer)):
                         await server.cleanup()
         except Exception as exc:
             print(f"MCP cleanup failed: {exc}")

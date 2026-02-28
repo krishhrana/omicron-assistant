@@ -89,6 +89,7 @@ cp .env.example .env
 - `GOOGLE_DRIVE_SCOPES`
 - `GOOGLE_DRIVE_REDIRECT_URI`
 - `GOOGLE_DRIVE_POST_CONNECT_REDIRECT`
+- `OAUTH_STATE_SIGNING_SECRET`
 - `PLAYWRIGHT_MCP_URL`
 - `WHATSAPP_SESSION_PROVIDER` (`local` by default)
 - `WHATSAPP_BRIDGE_JWT_SECRET` (required when `WHATSAPP_SESSION_PROVIDER=local`)
@@ -112,6 +113,8 @@ If `BROWSER_SESSION_PROVIDER=controller`:
 ### Optional/fallback
 
 - `SUPABASE_JWT_SECRET` (JWT fallback validation)
+- `OAUTH_STATE_TTL_SECONDS` (defaults to `600`)
+- `OAUTH_STATE_ISSUER` (defaults to `omicron-api`)
 - `GMAIL_TOKENS_ENCRYPTION_KEY`
   - if omitted, startup fetches vault secret `gmail_tokens_encryption_key`.
 
@@ -128,6 +131,7 @@ Apply SQL files from `app/db/table_schemas/`:
 - `user_onboarding_schema.sql`
 - `gmail_schema.sql`
 - `google_drive_schema.sql`
+- `oauth_transactions_schema.sql`
 - `sessions_schema.sql`
 - `browser_sessions_schema.sql`
 - `whatsapp_connections_schema.sql`
@@ -165,11 +169,13 @@ Notes:
 
 ### Gmail OAuth
 - `GET /v1/oauth/gmail/start`
+- `GET /v1/oauth/gmail/status/{transaction_id}`
 - `GET /v1/oauth/gmail/callback`
 - `POST /v1/oauth/gmail/disconnect`
 
 ### Google Drive OAuth
 - `GET /v1/oauth/google-drive/start`
+- `GET /v1/oauth/google-drive/status/{transaction_id}`
 - `GET /v1/oauth/google-drive/callback`
 - `POST /v1/oauth/google-drive/disconnect`
 

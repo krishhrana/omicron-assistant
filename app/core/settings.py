@@ -87,6 +87,14 @@ class GoogleDriveSettings(GoogleAuthSettings):
     
 
 
+class OAuthStateSettings(BaseSettings):
+    signing_secret: str = Field(validation_alias="oauth_state_signing_secret")
+    ttl_seconds: int = Field(default=600, validation_alias="oauth_state_ttl_seconds")
+    issuer: str = Field(default="omicron-api", validation_alias="oauth_state_issuer")
+
+    model_config = settings_config
+
+
 class OpenAISettings(BaseSettings): 
     api_key: str = Field(validation_alias='openai_api_key')
     max_retries: int = 5
@@ -264,6 +272,7 @@ def validate_startup_security_configuration() -> None:
     browser_agent = get_browser_agent_settings()
     whatsapp_agent = get_whatsapp_agent_settings()
     whatsapp_session = get_whatsapp_session_settings()
+    oauth_state = get_oauth_state_settings()
 
     errors: list[str] = []
 
@@ -273,6 +282,13 @@ def validate_startup_security_configuration() -> None:
         errors.append(
             "Configure SUPABASE_JWT_SECRET or both SUPABASE_URL and SUPABASE_API_KEY for token validation."
         )
+
+    if not _is_non_empty(oauth_state.signing_secret):
+        errors.append("OAUTH_STATE_SIGNING_SECRET is required.")
+    if oauth_state.ttl_seconds <= 0:
+        errors.append("OAUTH_STATE_TTL_SECONDS must be greater than 0.")
+    if not _is_non_empty(oauth_state.issuer):
+        errors.append("OAUTH_STATE_ISSUER is required.")
 
     has_bridge_jwt_secret = _is_non_empty(whatsapp_session.bridge_jwt_secret)
     whatsapp_provider = whatsapp_session.provider.strip().lower()
@@ -340,6 +356,11 @@ def get_gmail_auth_settings() -> GmailAuthSettings:
 @lru_cache(1)
 def get_google_drive_settings() -> GoogleDriveSettings:
     return GoogleDriveSettings()
+
+
+@lru_cache(1)
+def get_oauth_state_settings() -> OAuthStateSettings:
+    return OAuthStateSettings()
 
 
 def get_openai_settings() -> OpenAISettings:
