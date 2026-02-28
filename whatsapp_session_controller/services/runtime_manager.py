@@ -200,6 +200,24 @@ class RuntimeManager:
             runtime_id=normalized_runtime_id,
         )
 
+    async def get_current(self, *, user_id: str) -> RuntimeRecord | None:
+        normalized_user_id = user_id.strip()
+        if not normalized_user_id:
+            return None
+
+        record = await self._repository.get_by_user(user_id=normalized_user_id)
+        if record is None:
+            return None
+
+        now = self._utc_now()
+        if now >= record.lease_expires_at:
+            return None
+        if now >= record.hard_expires_at:
+            return None
+        if record.state not in {"ready", "degraded"}:
+            return None
+        return record
+
     async def touch(
         self,
         *,

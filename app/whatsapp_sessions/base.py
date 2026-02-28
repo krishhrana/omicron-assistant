@@ -19,6 +19,13 @@ class WhatsAppSessionProvider(Protocol):
         user_jwt: str,
     ) -> WhatsAppRuntimeLease: ...
 
+    async def read_current(
+        self,
+        *,
+        user_id: str,
+        user_jwt: str,
+    ) -> WhatsAppRuntimeLease | None: ...
+
     async def disconnect(
         self,
         *,

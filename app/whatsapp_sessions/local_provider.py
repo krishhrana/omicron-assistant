@@ -23,6 +23,14 @@ class LocalWhatsAppSessionProvider:
             bridge_base_url=self._settings.bridge_base_url.rstrip("/"),
         )
 
+    async def read_current(
+        self,
+        *,
+        user_id: str,
+        user_jwt: str,
+    ) -> WhatsAppRuntimeLease | None:
+        return await self.get_or_create(user_id=user_id, user_jwt=user_jwt)
+
     async def disconnect(
         self,
         *,

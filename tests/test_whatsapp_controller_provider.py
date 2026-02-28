@@ -34,6 +34,11 @@ class _StubAsyncClient:
         _ = kwargs
         return self._response
 
+    async def get(self, *args, **kwargs):
+        _ = args
+        _ = kwargs
+        return self._response
+
 
 def _async_client_factory(response: _StubResponse):
     class _FactoryClient:
@@ -50,6 +55,9 @@ def _async_client_factory(response: _StubResponse):
 
         async def post(self, *args, **kwargs):
             return await self._client.post(*args, **kwargs)
+
+        async def get(self, *args, **kwargs):
+            return await self._client.get(*args, **kwargs)
 
     return _FactoryClient
 
@@ -222,3 +230,52 @@ def test_touch_500_raises_runtime_error(
 
     with pytest.raises(RuntimeError, match="controller error"):
         asyncio.run(provider.touch(user_id="user-1", user_jwt="token-1", runtime_id="wa_rt_1"))
+
+
+def test_read_current_404_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _provider()
+    monkeypatch.setattr(
+        provider_module,
+        "mint_controller_read_current_bearer_header",
+        lambda **_: {"Authorization": "Bearer test"},
+    )
+    monkeypatch.setattr(
+        provider_module.httpx,
+        "AsyncClient",
+        _async_client_factory(_StubResponse(404, {"detail": "not found"})),
+    )
+
+    result = asyncio.run(provider.read_current(user_id="user-1", user_jwt="token-1"))
+    assert result is None
+
+
+def test_read_current_200_returns_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _provider()
+    monkeypatch.setattr(
+        provider_module,
+        "mint_controller_read_current_bearer_header",
+        lambda **_: {"Authorization": "Bearer test"},
+    )
+    monkeypatch.setattr(
+        provider_module.httpx,
+        "AsyncClient",
+        _async_client_factory(
+            _StubResponse(
+                200,
+                {
+                    "runtime_id": "wa_rt_1",
+                    "bridge_base_url": "https://bridge.rt",
+                    "mcp_url": "https://mcp.rt/mcp",
+                    "state": "ready",
+                },
+            )
+        ),
+    )
+
+    result = asyncio.run(provider.read_current(user_id="user-1", user_jwt="token-1"))
+    assert isinstance(result, WhatsAppRuntimeLease)
+    assert result.runtime_id == "wa_rt_1"

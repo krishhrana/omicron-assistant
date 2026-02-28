@@ -142,6 +142,20 @@ def mint_controller_read_bearer_header(
     )
 
 
+def mint_controller_read_current_bearer_header(
+    *,
+    user_id: str,
+    subject: str = "omicron-api",
+) -> dict[str, str]:
+    settings = get_whatsapp_session_settings()
+    return mint_whatsapp_controller_bearer_header(
+        subject=subject,
+        user_id=user_id,
+        scopes=["whatsapp:runtime:read"],
+        audiences=[settings.controller_jwt_audience],
+    )
+
+
 def mint_controller_touch_bearer_header(
     *,
     user_id: str,

@@ -9,6 +9,7 @@ class WhatsAppConnectStatusResponse(BaseModel):
     status: str
     connected: bool
     reauth_required: bool
+    disconnect_reason: str | None = None
     message: str | None = None
     qr_code: str | None = None
     qr_image_data_url: str | None = None

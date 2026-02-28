@@ -14,11 +14,21 @@ class _FakeSessionProvider:
             mcp_url="https://mcp.test",
         )
         self.get_or_create_calls: list[tuple[str, str]] = []
+        self.read_current_calls: list[tuple[str, str]] = []
         self.touch_calls: list[tuple[str, str, str | None]] = []
         self.disconnect_calls: list[tuple[str, str, str | None]] = []
 
     async def get_or_create(self, *, user_id: str, user_jwt: str) -> WhatsAppRuntimeLease:
         self.get_or_create_calls.append((user_id, user_jwt))
+        return self._lease
+
+    async def read_current(
+        self,
+        *,
+        user_id: str,
+        user_jwt: str,
+    ) -> WhatsAppRuntimeLease | None:
+        self.read_current_calls.append((user_id, user_jwt))
         return self._lease
 
     async def touch(
@@ -132,13 +142,13 @@ def test_whatsapp_connect_start_status_disconnect_lifecycle(
 
     disconnect_response = asyncio.run(routes.whatsapp_connect_disconnect(auth_ctx=auth_ctx))
     assert disconnect_response.ok is True
-    assert disconnect_response.status == "logged_out"
+    assert disconnect_response.status == "disconnected"
 
     assert provider.get_or_create_calls == [
         ("user-1", "token-1"),
         ("user-1", "token-1"),
-        ("user-1", "token-1"),
     ]
+    assert provider.read_current_calls == [("user-1", "token-1")]
     assert provider.touch_calls == [
         ("user-1", "token-1", "wa_rt_test"),
         ("user-1", "token-1", "wa_rt_test"),
@@ -148,5 +158,51 @@ def test_whatsapp_connect_start_status_disconnect_lifecycle(
     assert [call["status"] for call in upsert_calls] == [
         "awaiting_qr",
         "connected",
-        "logged_out",
+        "disconnected",
     ]
+
+
+def test_whatsapp_connect_status_without_runtime_reports_runtime_expired(
+    monkeypatch,
+) -> None:
+    provider = _FakeSessionProvider()
+
+    async def _fake_read_current(
+        *,
+        user_id: str,
+        user_jwt: str,
+    ) -> WhatsAppRuntimeLease | None:
+        provider.read_current_calls.append((user_id, user_jwt))
+        return None
+
+    async def _fake_get_whatsapp_connection(*, user_id: str, user_jwt: str):
+        assert user_id == "user-1"
+        assert user_jwt == "token-1"
+        return {
+            "status": "connected",
+            "connected_at": "2026-02-27T23:59:00Z",
+            "last_error_code": None,
+        }
+
+    upsert_calls: list[dict] = []
+
+    async def _fake_upsert_whatsapp_connection(**kwargs):
+        upsert_calls.append(kwargs)
+        return kwargs
+
+    monkeypatch.setattr(routes, "get_whatsapp_session_provider", lambda: provider)
+    monkeypatch.setattr(routes, "get_whatsapp_connection", _fake_get_whatsapp_connection)
+    monkeypatch.setattr(routes, "upsert_whatsapp_connection", _fake_upsert_whatsapp_connection)
+    monkeypatch.setattr(provider, "read_current", _fake_read_current)
+
+    auth_ctx = AuthContext(user_id="user-1", token="token-1")
+    status_response = asyncio.run(routes.whatsapp_connect_status(auth_ctx=auth_ctx))
+    assert status_response.status == "disconnected"
+    assert status_response.connected is False
+    assert status_response.disconnect_reason == "runtime_expired"
+    assert status_response.runtime_id is None
+    assert provider.get_or_create_calls == []
+    assert provider.read_current_calls == [("user-1", "token-1")]
+    assert len(upsert_calls) == 1
+    assert upsert_calls[0]["runtime_id"] is None
+    assert upsert_calls[0]["last_error_code"] == "runtime_expired"

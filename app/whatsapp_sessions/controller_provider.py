@@ -10,6 +10,7 @@ from .controller_auth import (
     WhatsAppControllerAuthError,
     mint_controller_disconnect_bearer_header,
     mint_controller_lease_bearer_header,
+    mint_controller_read_current_bearer_header,
     mint_controller_touch_bearer_header,
 )
 from .base import WhatsAppRuntimeLease
@@ -140,6 +141,55 @@ class ControllerWhatsAppSessionProvider:
             raise ControllerLeaseUnavailableError(detail)
         raise ControllerLeaseResponseError(detail)
 
+    async def _request_controller_current(
+        self,
+        *,
+        user_id: str,
+    ) -> WhatsAppRuntimeLease | None:
+        base_url = self._required_controller_base_url()
+        timeout = self._controller_timeout()
+        try:
+            headers = mint_controller_read_current_bearer_header(user_id=user_id)
+        except WhatsAppControllerAuthError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+        url = f"{base_url}/v1/whatsapp/runtimes/current"
+        query_params = {"user_id": user_id}
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(url, headers=headers, params=query_params)
+        except httpx.RequestError as exc:
+            raise ControllerLeaseUnavailableError(
+                f"WhatsApp session controller is unavailable: {exc}"
+            ) from exc
+
+        if response.status_code == 404:
+            return None
+
+        detail = f"Failed to read WhatsApp runtime (HTTP {response.status_code})"
+        try:
+            response_body = response.json()
+            if isinstance(response_body, dict):
+                message = response_body.get("message") or response_body.get("detail")
+                if isinstance(message, str) and message.strip():
+                    detail = message.strip()
+            else:
+                response_body = None
+        except Exception:
+            response_body = None
+
+        if response.status_code == 200:
+            if not isinstance(response_body, dict):
+                raise ControllerLeaseResponseError("Invalid controller runtime response payload")
+            try:
+                return self._normalize_runtime_lease(response_body)
+            except ControllerLeaseNotReadyError:
+                return None
+
+        if response.status_code == 429 or response.status_code >= 500:
+            raise ControllerLeaseUnavailableError(detail)
+        raise ControllerLeaseResponseError(detail)
+
     async def get_or_create(
         self,
         *,
@@ -152,6 +202,18 @@ class ControllerWhatsAppSessionProvider:
         except ControllerLeaseUnavailableError as exc:
             raise RuntimeError(str(exc)) from exc
         except ControllerLeaseNotReadyError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    async def read_current(
+        self,
+        *,
+        user_id: str,
+        user_jwt: str,
+    ) -> WhatsAppRuntimeLease | None:
+        _ = user_jwt
+        try:
+            return await self._request_controller_current(user_id=user_id)
+        except ControllerLeaseUnavailableError as exc:
             raise RuntimeError(str(exc)) from exc
 
     async def disconnect(

@@ -32,9 +32,41 @@ _VALID_BRIDGE_STATES = {
     "error",
 }
 
+_DISCONNECT_REASON_RUNTIME_EXPIRED = "runtime_expired"
+_DISCONNECT_REASON_USER_DISCONNECTED = "user_disconnected"
+_DISCONNECT_REASON_WHATSAPP_LOGGED_OUT = "whatsapp_logged_out"
+_VALID_DISCONNECT_REASONS = {
+    _DISCONNECT_REASON_RUNTIME_EXPIRED,
+    _DISCONNECT_REASON_USER_DISCONNECTED,
+    _DISCONNECT_REASON_WHATSAPP_LOGGED_OUT,
+}
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _coerce_disconnect_reason(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in _VALID_DISCONNECT_REASONS:
+        return normalized
+    return None
+
+
+def _disconnect_message(reason: str) -> str:
+    if reason == _DISCONNECT_REASON_USER_DISCONNECTED:
+        return "WhatsApp was disconnected by user action. Tap Connect to relink."
+    if reason == _DISCONNECT_REASON_WHATSAPP_LOGGED_OUT:
+        return "WhatsApp logged out. Reconnect is required."
+    return "WhatsApp runtime expired. Tap Connect to resume."
+
+
+def _disconnect_status(reason: str) -> str:
+    if reason == _DISCONNECT_REASON_WHATSAPP_LOGGED_OUT:
+        return "logged_out"
+    return "disconnected"
 
 
 def _coerce_bridge_status(
@@ -185,6 +217,11 @@ async def _sync_connection_snapshot(
         if previous and isinstance(previous.get("disconnected_at"), str)
         else None
     )
+    existing_disconnect_reason = (
+        _coerce_disconnect_reason(previous.get("last_error_code"))
+        if isinstance(previous, dict)
+        else None
+    )
 
     if connected:
         connected_at = connected_at or now_iso
@@ -192,7 +229,17 @@ async def _sync_connection_snapshot(
     elif state in {"disconnected", "logged_out", "error"}:
         disconnected_at = now_iso
 
-    last_error_code = state if state == "error" else None
+    disconnect_reason: str | None = None
+    if state == "logged_out":
+        disconnect_reason = _DISCONNECT_REASON_WHATSAPP_LOGGED_OUT
+    elif state == "disconnected":
+        disconnect_reason = existing_disconnect_reason
+
+    last_error_code = None
+    if disconnect_reason is not None:
+        last_error_code = disconnect_reason
+    elif state == "error":
+        last_error_code = "error"
     try:
         await upsert_whatsapp_connection(
             user_id=auth_ctx.user_id,
@@ -220,6 +267,7 @@ async def _sync_connection_snapshot(
         status=state,
         connected=connected,
         reauth_required=reauth_required,
+        disconnect_reason=disconnect_reason,
         message=message,
         qr_code=qr_code,
         qr_image_data_url=qr_image_data_url,
@@ -228,6 +276,72 @@ async def _sync_connection_snapshot(
         sync_total=sync_total,
         updated_at=updated_at,
         poll_after_seconds=_poll_interval_for_state(state),
+    )
+
+
+async def _runtime_disconnected_status(
+    *,
+    auth_ctx: AuthContext,
+) -> WhatsAppConnectStatusResponse:
+    previous = await get_whatsapp_connection(user_id=auth_ctx.user_id, user_jwt=auth_ctx.token)
+    previous_status = (
+        str(previous.get("status") or "").strip().lower()
+        if isinstance(previous, dict)
+        else ""
+    )
+    disconnect_reason = (
+        _coerce_disconnect_reason(previous.get("last_error_code"))
+        if isinstance(previous, dict)
+        else None
+    )
+    if disconnect_reason is None:
+        if previous_status == "logged_out":
+            disconnect_reason = _DISCONNECT_REASON_WHATSAPP_LOGGED_OUT
+        else:
+            disconnect_reason = _DISCONNECT_REASON_RUNTIME_EXPIRED
+
+    now_iso = _utc_now_iso()
+    connected_at = (
+        previous.get("connected_at")
+        if isinstance(previous, dict) and isinstance(previous.get("connected_at"), str)
+        else None
+    )
+    status = _disconnect_status(disconnect_reason)
+    reauth_required = disconnect_reason in {
+        _DISCONNECT_REASON_USER_DISCONNECTED,
+        _DISCONNECT_REASON_WHATSAPP_LOGGED_OUT,
+    }
+    try:
+        await upsert_whatsapp_connection(
+            user_id=auth_ctx.user_id,
+            user_jwt=auth_ctx.token,
+            runtime_id=None,
+            status=status,
+            reauth_required=reauth_required,
+            last_error_code=disconnect_reason,
+            connected_at=connected_at,
+            disconnected_at=now_iso,
+            last_seen_at=now_iso,
+        )
+    except Exception as exc:
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Failed to persist WhatsApp connection state. "
+                "Apply whatsapp_connections schema migration first."
+            ),
+        ) from exc
+
+    return WhatsAppConnectStatusResponse(
+        runtime_id=None,
+        status=status,
+        connected=False,
+        reauth_required=reauth_required,
+        disconnect_reason=disconnect_reason,
+        message=_disconnect_message(disconnect_reason),
+        updated_at=now_iso,
+        poll_after_seconds=_poll_interval_for_state(status),
     )
 
 
@@ -286,9 +400,11 @@ async def whatsapp_connect_status(
 ) -> WhatsAppConnectStatusResponse:
     provider = get_whatsapp_session_provider()
     try:
-        lease = await provider.get_or_create(user_id=auth_ctx.user_id, user_jwt=auth_ctx.token)
+        lease = await provider.read_current(user_id=auth_ctx.user_id, user_jwt=auth_ctx.token)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if lease is None:
+        return await _runtime_disconnected_status(auth_ctx=auth_ctx)
     try:
         status_headers = mint_bridge_bearer_header(
             user_id=auth_ctx.user_id,
@@ -341,9 +457,9 @@ async def whatsapp_connect_disconnect(
             user_id=auth_ctx.user_id,
             user_jwt=auth_ctx.token,
             runtime_id=lease.runtime_id,
-            status="logged_out",
+            status="disconnected",
             reauth_required=True,
-            last_error_code=None,
+            last_error_code=_DISCONNECT_REASON_USER_DISCONNECTED,
             connected_at=connected_at,
             disconnected_at=now_iso,
             last_seen_at=now_iso,
@@ -356,7 +472,7 @@ async def whatsapp_connect_disconnect(
                 "Apply whatsapp_connections schema migration first."
             ),
         ) from exc
-    return WhatsAppDisconnectResponse(ok=True, status="logged_out")
+    return WhatsAppDisconnectResponse(ok=True, status="disconnected")
 
 
 @router.post("/whatsapp/runtime/prewarm", response_model=WhatsAppPrewarmResponse)

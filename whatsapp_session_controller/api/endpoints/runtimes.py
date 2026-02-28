@@ -93,6 +93,21 @@ async def lease_runtime(
     return _to_lease_response(record=record, action=action)
 
 
+@router.get("/current", response_model=RuntimeStatusResponse)
+async def get_current_runtime(
+    user_id: str = Query(..., min_length=1),
+    auth_ctx: ControllerAuthContext = Depends(require_scope("whatsapp:runtime:read")),
+    runtime_manager: RuntimeManager = Depends(get_runtime_manager),
+) -> RuntimeStatusResponse:
+    resolved_user_id = _normalize_identifier(value=user_id, field_name="user_id")
+    _enforce_user_ownership(auth_ctx=auth_ctx, user_id=resolved_user_id)
+
+    record = await runtime_manager.get_current(user_id=resolved_user_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Runtime not found")
+    return _to_status_response(record)
+
+
 @router.get("/{runtime_id}", response_model=RuntimeStatusResponse)
 async def get_runtime(
     runtime_id: str,
