@@ -106,6 +106,10 @@ If `WHATSAPP_MCP_CONNECT_ON_STARTUP=true`:
 If `WHATSAPP_SESSION_PROVIDER=controller`:
 - `WHATSAPP_SESSION_CONTROLLER_URL`
 - `WHATSAPP_SESSION_CONTROLLER_JWT_SECRET`
+- `WHATSAPP_SESSION_CONTROLLER_JWT_AUDIENCE` (default: `whatsapp-session-controller`)
+- `WHATSAPP_SESSION_CONTROLLER_JWT_ISSUER` (default: `omicron-api`)
+- `WHATSAPP_SESSION_CONTROLLER_JWT_TTL_SECONDS` (default: `60`)
+- `WHATSAPP_SESSION_CONTROLLER_TIMEOUT_SECONDS` (default: `10`)
 
 If `BROWSER_SESSION_PROVIDER=controller`:
 - controller fields exist in settings, but controller mode is currently not implemented.
