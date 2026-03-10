@@ -102,17 +102,44 @@ class RuntimeLeaseRepository:
             ),
         )
 
+    async def _select_by_user(
+        self,
+        *,
+        client: Any,
+        user_id: str,
+    ) -> RuntimeRecord | None:
+        response = await (
+            client.table(self._table_name)
+            .select(self._SELECT_COLUMNS)
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        return self._from_row(response.data if response else None)
+
+    async def _select_by_user_runtime_generation(
+        self,
+        *,
+        client: Any,
+        user_id: str,
+        runtime_id: str,
+        runtime_generation: int,
+    ) -> RuntimeRecord | None:
+        response = await (
+            client.table(self._table_name)
+            .select(self._SELECT_COLUMNS)
+            .eq("user_id", user_id)
+            .eq("runtime_id", runtime_id)
+            .eq("runtime_generation", runtime_generation)
+            .maybe_single()
+            .execute()
+        )
+        return self._from_row(response.data if response else None)
+
     async def get_by_user(self, *, user_id: str) -> RuntimeRecord | None:
         client = await create_service_supabase_client()
         try:
-            response = await (
-                client.table(self._table_name)
-                .select(self._SELECT_COLUMNS)
-                .eq("user_id", user_id)
-                .maybe_single()
-                .execute()
-            )
-            return self._from_row(response.data if response else None)
+            return await self._select_by_user(client=client, user_id=user_id)
         finally:
             await client.postgrest.aclose()
 
@@ -165,31 +192,33 @@ class RuntimeLeaseRepository:
         try:
             if current is None:
                 try:
-                    response = await (
-                        client.table(self._table_name)
-                        .insert(insert_payload)
-                        .select(self._SELECT_COLUMNS)
-                        .maybe_single()
-                        .execute()
-                    )
+                    await client.table(self._table_name).insert(insert_payload).execute()
                 except APIError as exc:
                     # Concurrent create for same user_id. Treat only unique violation as CAS miss.
                     if str(getattr(exc, "code", "")).strip() != "23505":
                         raise
                     return None
-                return self._from_row(response.data if response else None)
+                return await self._select_by_user_runtime_generation(
+                    client=client,
+                    user_id=next_record.user_id,
+                    runtime_id=next_record.runtime_id,
+                    runtime_generation=next_record.generation,
+                )
 
-            response = await (
+            await (
                 client.table(self._table_name)
                 .update(update_payload)
                 .eq("user_id", current.user_id)
                 .eq("runtime_id", current.runtime_id)
                 .eq("runtime_generation", current.generation)
-                .select(self._SELECT_COLUMNS)
-                .maybe_single()
                 .execute()
             )
-            return self._from_row(response.data if response else None)
+            return await self._select_by_user_runtime_generation(
+                client=client,
+                user_id=next_record.user_id,
+                runtime_id=next_record.runtime_id,
+                runtime_generation=next_record.generation,
+            )
         finally:
             await client.postgrest.aclose()
 
@@ -223,17 +252,20 @@ class RuntimeLeaseRepository:
 
         client = await create_service_supabase_client()
         try:
-            response = await (
+            await (
                 client.table(self._table_name)
                 .update(payload)
                 .eq("user_id", user_id)
                 .eq("runtime_id", runtime_id)
                 .eq("runtime_generation", expected_generation)
-                .select(self._SELECT_COLUMNS)
-                .maybe_single()
                 .execute()
             )
-            return self._from_row(response.data if response else None)
+            return await self._select_by_user_runtime_generation(
+                client=client,
+                user_id=user_id,
+                runtime_id=runtime_id,
+                runtime_generation=expected_generation,
+            )
         finally:
             await client.postgrest.aclose()
 
@@ -263,17 +295,20 @@ class RuntimeLeaseRepository:
 
         client = await create_service_supabase_client()
         try:
-            response = await (
+            await (
                 client.table(self._table_name)
                 .update(payload)
                 .eq("user_id", user_id)
                 .eq("runtime_id", runtime_id)
                 .eq("runtime_generation", expected_generation)
-                .select(self._SELECT_COLUMNS)
-                .maybe_single()
                 .execute()
             )
-            return self._from_row(response.data if response else None)
+            return await self._select_by_user_runtime_generation(
+                client=client,
+                user_id=user_id,
+                runtime_id=runtime_id,
+                runtime_generation=expected_generation,
+            )
         finally:
             await client.postgrest.aclose()
 

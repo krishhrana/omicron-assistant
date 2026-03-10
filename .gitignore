@@ -16,4 +16,5 @@ tests/*
 !tests/test_whatsapp_controller_provider.py
 !tests/test_whatsapp_connect_lifecycle.py
 !tests/test_whatsapp_session_controller_runtime_manager.py
+!tests/test_whatsapp_session_controller_settings.py
 plans/*

@@ -224,7 +224,6 @@ Template placeholders supported:
 - `{task_arn}`
 - `{task_id}`
 - `{task_private_ip}`
-- `{task_public_ip}`
 - `{bridge_port}`
 - `{mcp_port}`
 - `{mcp_path}`
@@ -254,6 +253,10 @@ Behavior:
 - `WHATSAPP_CONTROLLER_ECS_CLUSTER`
 - `WHATSAPP_CONTROLLER_ECS_TASK_DEFINITION`
 
+### Optional for local AWS profile usage
+
+- `WHATSAPP_CONTROLLER_AWS_PROFILE` (for example: `omicron-local`)
+
 ### Core runtime knobs
 
 - `WHATSAPP_RUNTIME_ORCHESTRATOR` (`ecs` or `local`)
@@ -282,6 +285,11 @@ Behavior:
 - `WHATSAPP_CONTROLLER_ECS_ASSIGN_PUBLIC_IP`
 - `WHATSAPP_CONTROLLER_ECS_LAUNCH_TYPE` (`EC2` or `FARGATE`, default `EC2`)
 - `WHATSAPP_CONTROLLER_ECS_STARTED_BY_PREFIX`
+
+Runtime network policy:
+- `WHATSAPP_CONTROLLER_ECS_ASSIGN_PUBLIC_IP` must be `false` (public runtime exposure is not supported).
+- Use private subnets and security groups that only allow ingress from backend/controller security groups.
+- Runtime URL templates may not use `{task_public_ip}`.
 
 See `.env.example` for full key list.
 

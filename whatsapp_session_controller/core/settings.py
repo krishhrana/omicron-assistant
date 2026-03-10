@@ -145,6 +145,10 @@ class WhatsAppSessionControllerSettings(BaseSettings):
         default=None,
         validation_alias="WHATSAPP_CONTROLLER_AWS_REGION",
     )
+    aws_profile: str | None = Field(
+        default=None,
+        validation_alias="WHATSAPP_CONTROLLER_AWS_PROFILE",
+    )
     ecs_cluster: str | None = Field(
         default=None,
         validation_alias="WHATSAPP_CONTROLLER_ECS_CLUSTER",
@@ -238,6 +242,26 @@ class WhatsAppSessionControllerSettings(BaseSettings):
             if not (self.ecs_task_definition or "").strip():
                 raise ValueError(
                     "WHATSAPP_CONTROLLER_ECS_TASK_DEFINITION is required when WHATSAPP_RUNTIME_ORCHESTRATOR=ecs."
+                )
+            if self.ecs_assign_public_ip:
+                raise ValueError(
+                    "WHATSAPP_CONTROLLER_ECS_ASSIGN_PUBLIC_IP must be false. "
+                    "Public runtime exposure is not supported."
+                )
+            if not self.ecs_subnets:
+                raise ValueError(
+                    "WHATSAPP_CONTROLLER_ECS_SUBNETS is required for ECS runtime networking."
+                )
+            if not self.ecs_security_groups:
+                raise ValueError(
+                    "WHATSAPP_CONTROLLER_ECS_SECURITY_GROUPS is required for ECS runtime networking."
+                )
+            bridge_template = (self.runtime_bridge_base_url_template or "").lower()
+            mcp_template = (self.runtime_mcp_url_template or "").lower()
+            if "{task_public_ip}" in bridge_template or "{task_public_ip}" in mcp_template:
+                raise ValueError(
+                    "Runtime URL templates cannot use {task_public_ip}. "
+                    "Public runtime endpoint resolution is not supported."
                 )
         return self
 

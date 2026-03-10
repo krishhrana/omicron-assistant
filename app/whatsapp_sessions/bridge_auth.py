@@ -108,8 +108,12 @@ def mint_bridge_bearer_header(
 ) -> dict[str, str]:
     """Mint a short-lived JWT bearer header for WhatsApp bridge control-plane calls."""
     settings = get_whatsapp_session_settings()
+    normalized_user_id = user_id.strip()
+    if not normalized_user_id:
+        raise WhatsAppBridgeAuthError("user_id must be non-empty.")
+    service_subject = settings.bridge_jwt_issuer.strip() or "omicron-api"
     return mint_whatsapp_internal_bearer_header(
-        subject=user_id,
+        subject=f"{service_subject}:{normalized_user_id}",
         runtime_id=runtime_id,
         scopes=[scope],
         audiences=[settings.bridge_jwt_audience],

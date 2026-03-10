@@ -1,0 +1,226 @@
+{
+  "family": "whatsapp-mcp",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "1024",
+  "memory": "2048",
+  "runtimePlatform": {
+    "operatingSystemFamily": "LINUX",
+    "cpuArchitecture": "ARM64"
+  },
+  "executionRoleArn": "arn:aws:iam::752875621148:role/omicron-ecs-task-execution-role",
+  "taskRoleArn": "arn:aws:iam::752875621148:role/omicron-whatsapp-runtime-task-role",
+  "containerDefinitions": [
+    {
+      "name": "whatsapp-bridge",
+      "image": "752875621148.dkr.ecr.us-west-2.amazonaws.com/whatsapp-bridge:v3",
+      "essential": true,
+      "user": "0",
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "WHATSAPP_BRIDGE_HOST",
+          "value": "0.0.0.0"
+        },
+        {
+          "name": "WHATSAPP_BRIDGE_PORT",
+          "value": "8080"
+        },
+        {
+          "name": "WHATSAPP_BRIDGE_JWT_AUDIENCE",
+          "value": "whatsapp-bridge"
+        },
+        {
+          "name": "WHATSAPP_BRIDGE_JWT_ISSUER",
+          "value": "omicron-api"
+        },
+        {
+          "name": "WHATSAPP_INTERNAL_ALLOWED_SUBJECT_PREFIXES",
+          "value": "omicron-api:,whatsapp-session-controller:"
+        },
+        {
+          "name": "WHATSAPP_RUNTIME_ECS_MODE",
+          "value": "true"
+        },
+        {
+          "name": "WHATSAPP_MESSAGE_STORE_MODE",
+          "value": "hot_local_sync"
+        },
+        {
+          "name": "WHATSAPP_MESSAGE_STORE_PERSISTENT_DIR",
+          "value": "/app/whatsapp-bridge/store"
+        },
+        {
+          "name": "WHATSAPP_MESSAGE_STORE_HOT_DIR",
+          "value": "/app/whatsapp-hot-store"
+        },
+        {
+          "name": "WHATSAPP_MESSAGE_STORE_SYNC_INTERVAL_SECONDS",
+          "value": "5"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "WHATSAPP_BRIDGE_JWT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:us-west-2:752875621148:secret:dev/whatsapp/bridge_jwt_secret-qWp3bd:WHATSAPP_BRIDGE_JWT_SECRET::"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "whatsapp-hot-store",
+          "containerPath": "/app/whatsapp-hot-store",
+          "readOnly": false
+        },
+        {
+          "sourceVolume": "whatsapp-store",
+          "containerPath": "/app/whatsapp-bridge/store",
+          "readOnly": false
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/whatsapp-mcp",
+          "awslogs-region": "us-west-2",
+          "awslogs-stream-prefix": "bridge"
+        }
+      }
+    },
+    {
+      "name": "whatsapp-mcp-server",
+      "image": "752875621148.dkr.ecr.us-west-2.amazonaws.com/whatsapp-mcp-server:v3-slim",
+      "essential": true,
+      "user": "0",
+      "dependsOn": [
+        {
+          "containerName": "whatsapp-bridge",
+          "condition": "START"
+        }
+      ],
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "WHATSAPP_BRIDGE_API_BASE_URL",
+          "value": "http://127.0.0.1:8080"
+        },
+        {
+          "name": "WHATSAPP_BRIDGE_JWT_ISSUER",
+          "value": "omicron-api"
+        },
+        {
+          "name": "WHATSAPP_INTERNAL_ALLOWED_SUBJECT_PREFIXES",
+          "value": "omicron-api:,whatsapp-session-controller:"
+        },
+        {
+          "name": "WHATSAPP_RUNTIME_ECS_MODE",
+          "value": "true"
+        },
+        {
+          "name": "WHATSAPP_MESSAGE_STORE_MODE",
+          "value": "hot_local_sync"
+        },
+        {
+          "name": "WHATSAPP_MESSAGE_STORE_PERSISTENT_DIR",
+          "value": "/app/whatsapp-bridge/store"
+        },
+        {
+          "name": "WHATSAPP_MESSAGE_STORE_HOT_DIR",
+          "value": "/app/whatsapp-hot-store"
+        },
+        {
+          "name": "WHATSAPP_MESSAGE_STORE_SYNC_INTERVAL_SECONDS",
+          "value": "5"
+        },
+        {
+          "name": "WHATSAPP_MCP_TRANSPORT",
+          "value": "streamable-http"
+        },
+        {
+          "name": "WHATSAPP_MCP_HOST",
+          "value": "0.0.0.0"
+        },
+        {
+          "name": "WHATSAPP_MCP_PORT",
+          "value": "8000"
+        },
+        {
+          "name": "WHATSAPP_MCP_STREAMABLE_HTTP_PATH",
+          "value": "/mcp"
+        },
+        {
+          "name": "WHATSAPP_MCP_JWT_AUDIENCE",
+          "value": "whatsapp-mcp"
+        },
+        {
+          "name": "WHATSAPP_MCP_REQUIRED_SCOPE",
+          "value": "whatsapp:mcp"
+        },
+        {
+          "name": "WHATSAPP_MCP_AUTH_ISSUER_URL",
+          "value": "http://127.0.0.1:8000"
+        },
+        {
+          "name": "WHATSAPP_MCP_RESOURCE_SERVER_URL",
+          "value": "http://127.0.0.1:8000/mcp"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "WHATSAPP_BRIDGE_JWT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:us-west-2:752875621148:secret:dev/whatsapp/bridge_jwt_secret-qWp3bd:WHATSAPP_BRIDGE_JWT_SECRET::"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "whatsapp-hot-store",
+          "containerPath": "/app/whatsapp-hot-store",
+          "readOnly": false
+        },
+        {
+          "sourceVolume": "whatsapp-store",
+          "containerPath": "/app/whatsapp-bridge/store",
+          "readOnly": false
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/whatsapp-mcp",
+          "awslogs-region": "us-west-2",
+          "awslogs-stream-prefix": "mcp"
+        }
+      }
+    }
+  ],
+  "volumes": [
+    {
+      "name": "whatsapp-hot-store"
+    },
+    {
+      "name": "whatsapp-store",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-0c5a98f7b1f7691be",
+        "rootDirectory": "/",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "fsap-0afedddae66a9f177",
+          "iam": "ENABLED"
+        }
+      }
+    }
+  ]
+}

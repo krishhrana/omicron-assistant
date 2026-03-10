@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
@@ -14,6 +15,8 @@ from .controller_auth import (
     mint_controller_touch_bearer_header,
 )
 from .base import WhatsAppRuntimeLease
+
+logger = logging.getLogger(__name__)
 
 
 class ControllerLeaseUnavailableError(RuntimeError):
@@ -35,6 +38,15 @@ class ControllerWhatsAppSessionProvider:
 
     def __init__(self, settings: WhatsAppSessionSettings) -> None:
         self._settings = settings
+
+    @staticmethod
+    def _safe_user_label(user_id: str) -> str:
+        normalized = user_id.strip()
+        if not normalized:
+            return "unknown"
+        if len(normalized) <= 6:
+            return normalized
+        return f"{normalized[:3]}...{normalized[-2:]}"
 
     def _required_controller_base_url(self) -> str:
         base_url = (self._settings.controller_url or "").strip().rstrip("/")
@@ -100,6 +112,7 @@ class ControllerWhatsAppSessionProvider:
     ) -> WhatsAppRuntimeLease:  # noqa: PLR0911
         base_url = self._required_controller_base_url()
         timeout = self._controller_timeout()
+        user_label = self._safe_user_label(user_id)
         try:
             headers = mint_controller_lease_bearer_header(user_id=user_id)
         except WhatsAppControllerAuthError as exc:
@@ -112,14 +125,32 @@ class ControllerWhatsAppSessionProvider:
             "force_new": False,
         }
         url = f"{base_url}/v1/whatsapp/runtimes/lease"
+        logger.info(
+            "whatsapp.controller.lease.request user=%s url=%s timeout_seconds=%.2f ttl_seconds=%s",
+            user_label,
+            url,
+            timeout,
+            self.LEASE_TTL_SECONDS,
+        )
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, headers=headers, json=payload)
         except httpx.RequestError as exc:
+            logger.warning(
+                "whatsapp.controller.lease.request_failed user=%s url=%s error=%s",
+                user_label,
+                url,
+                exc,
+            )
             raise ControllerLeaseUnavailableError(
                 f"WhatsApp session controller is unavailable: {exc}"
             ) from exc
 
+        logger.info(
+            "whatsapp.controller.lease.response user=%s status_code=%s",
+            user_label,
+            response.status_code,
+        )
         detail = f"Failed to lease WhatsApp runtime (HTTP {response.status_code})"
         try:
             response_body = response.json()
@@ -127,6 +158,14 @@ class ControllerWhatsAppSessionProvider:
                 message = response_body.get("message") or response_body.get("detail")
                 if isinstance(message, str) and message.strip():
                     detail = message.strip()
+                logger.info(
+                    "whatsapp.controller.lease.payload user=%s runtime_id=%s state=%s bridge_base_url=%s mcp_url=%s",
+                    user_label,
+                    str(response_body.get("runtime_id") or "").strip(),
+                    str(response_body.get("state") or "").strip().lower(),
+                    str(response_body.get("bridge_base_url") or "").strip(),
+                    str(response_body.get("mcp_url") or "").strip(),
+                )
             else:
                 response_body = None
         except Exception:
@@ -148,6 +187,7 @@ class ControllerWhatsAppSessionProvider:
     ) -> WhatsAppRuntimeLease | None:
         base_url = self._required_controller_base_url()
         timeout = self._controller_timeout()
+        user_label = self._safe_user_label(user_id)
         try:
             headers = mint_controller_read_current_bearer_header(user_id=user_id)
         except WhatsAppControllerAuthError as exc:
@@ -155,15 +195,36 @@ class ControllerWhatsAppSessionProvider:
 
         url = f"{base_url}/v1/whatsapp/runtimes/current"
         query_params = {"user_id": user_id}
+        logger.info(
+            "whatsapp.controller.current.request user=%s url=%s timeout_seconds=%.2f",
+            user_label,
+            url,
+            timeout,
+        )
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.get(url, headers=headers, params=query_params)
         except httpx.RequestError as exc:
+            logger.warning(
+                "whatsapp.controller.current.request_failed user=%s url=%s error=%s",
+                user_label,
+                url,
+                exc,
+            )
             raise ControllerLeaseUnavailableError(
                 f"WhatsApp session controller is unavailable: {exc}"
             ) from exc
 
+        logger.info(
+            "whatsapp.controller.current.response user=%s status_code=%s",
+            user_label,
+            response.status_code,
+        )
         if response.status_code == 404:
+            logger.info(
+                "whatsapp.controller.current.not_found user=%s",
+                user_label,
+            )
             return None
 
         detail = f"Failed to read WhatsApp runtime (HTTP {response.status_code})"
@@ -173,6 +234,14 @@ class ControllerWhatsAppSessionProvider:
                 message = response_body.get("message") or response_body.get("detail")
                 if isinstance(message, str) and message.strip():
                     detail = message.strip()
+                logger.info(
+                    "whatsapp.controller.current.payload user=%s runtime_id=%s state=%s bridge_base_url=%s mcp_url=%s",
+                    user_label,
+                    str(response_body.get("runtime_id") or "").strip(),
+                    str(response_body.get("state") or "").strip().lower(),
+                    str(response_body.get("bridge_base_url") or "").strip(),
+                    str(response_body.get("mcp_url") or "").strip(),
+                )
             else:
                 response_body = None
         except Exception:
@@ -230,6 +299,7 @@ class ControllerWhatsAppSessionProvider:
 
         base_url = self._required_controller_base_url()
         timeout = self._controller_timeout()
+        user_label = self._safe_user_label(user_id)
 
         try:
             headers = mint_controller_disconnect_bearer_header(
@@ -245,12 +315,32 @@ class ControllerWhatsAppSessionProvider:
             "stop_reason": "user_disconnect",
         }
 
+        logger.info(
+            "whatsapp.controller.disconnect.request user=%s runtime_id=%s url=%s timeout_seconds=%.2f",
+            user_label,
+            resolved_runtime_id,
+            url,
+            timeout,
+        )
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, headers=headers, json=payload)
         except httpx.RequestError as exc:
+            logger.warning(
+                "whatsapp.controller.disconnect.request_failed user=%s runtime_id=%s url=%s error=%s",
+                user_label,
+                resolved_runtime_id,
+                url,
+                exc,
+            )
             raise RuntimeError(f"WhatsApp session controller is unavailable: {exc}") from exc
 
+        logger.info(
+            "whatsapp.controller.disconnect.response user=%s runtime_id=%s status_code=%s",
+            user_label,
+            resolved_runtime_id,
+            response.status_code,
+        )
         detail = f"Failed to disconnect WhatsApp runtime (HTTP {response.status_code})"
         try:
             parsed = response.json()
@@ -278,6 +368,7 @@ class ControllerWhatsAppSessionProvider:
 
         base_url = self._required_controller_base_url()
         timeout = self._controller_timeout()
+        user_label = self._safe_user_label(user_id)
         try:
             headers = mint_controller_touch_bearer_header(
                 user_id=user_id,
@@ -291,12 +382,33 @@ class ControllerWhatsAppSessionProvider:
             "ttl_seconds": self.LEASE_TTL_SECONDS,
         }
         url = f"{base_url}/v1/whatsapp/runtimes/{resolved_runtime_id}/touch"
+        logger.info(
+            "whatsapp.controller.touch.request user=%s runtime_id=%s url=%s timeout_seconds=%.2f ttl_seconds=%s",
+            user_label,
+            resolved_runtime_id,
+            url,
+            timeout,
+            self.LEASE_TTL_SECONDS,
+        )
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, headers=headers, json=payload)
         except httpx.RequestError as exc:
+            logger.warning(
+                "whatsapp.controller.touch.request_failed user=%s runtime_id=%s url=%s error=%s",
+                user_label,
+                resolved_runtime_id,
+                url,
+                exc,
+            )
             raise RuntimeError(f"WhatsApp session controller is unavailable: {exc}") from exc
 
+        logger.info(
+            "whatsapp.controller.touch.response user=%s runtime_id=%s status_code=%s",
+            user_label,
+            resolved_runtime_id,
+            response.status_code,
+        )
         detail = f"Failed to refresh WhatsApp runtime lease (HTTP {response.status_code})"
         try:
             parsed = response.json()
